@@ -1,0 +1,48 @@
+{
+  "summary": "Iteration-2 testing: extended backend_test.py with 14 new tests covering Notes, Pinned Topics, signed Manifest (export/import/tamper/schema/signature), and PWA static assets. Also drove the UI via Playwright across Dashboard (ManifestCard + hero-pinned-link + nav-pinned), /pinned (edit/add seed/save), and /phase/0 (notes drawer autosave). 29/31 backend tests pass. The 2 failures (notes persistence + manifest-notes passthrough) share the same root cause: a Mongo dot-notation bug in POST /api/sessions/{id}/notes. Frontend wired correctly except note-preview reflects the same backend bug.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/sessions/{id}/notes",
+        "issue": "Step IDs contain '.' (e.g. '0.1'). Backend uses $set: {f'notes.{step_id}': note}, which Mongo interprets as a nested path. Result: a POST with step_id='0.1' stores notes = {\"0\": {\"1\": \"...\"}} instead of notes = {\"0.1\": \"...\"}. Verified live via curl: response contains \"notes\": {\"0\": {\"1\": \"hello\"}}. This breaks (a) GET /api/sessions/{id}.notes[step_id], (b) manifest export (session.notes map), (c) frontend note-preview-{step_id} rendering (lookup fails).",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "CommandCard note-preview",
+        "issue": "After typing in notes-textarea-0.1, closing the drawer, and reopening the page, the note-preview-0.1 element never renders. Root cause is the backend Mongo dot-notation bug above (notes[\"0.1\"] does not exist; it is stored nested). UI code is otherwise correct.",
+        "selector": "[data-testid=\"note-preview-0.1\"]",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix notes persistence: do NOT use step_id directly as a Mongo field name. Options: (1) replace '.' with a safe char when building the $set key (e.g. step_id.replace('.', '_')) and reverse on read; (2) fetch doc, mutate dict in Python, write back with full notes map; (3) store notes as an array of {step_id, note} objects. Apply the same transform in the manifest export/import to keep round-trip consistent.",
+    "After fix, re-run TestNotes.test_set_note_and_persist and TestManifest.test_export_manifest; both should go green and note-preview-0.1 will show on the UI without any frontend change."
+  ],
+  "critical_code_review_comments": [
+    "server.py: SIGNING_KEY read at import time without fallback — OK for required-env hygiene, but ensure prod sets TORUS_SIGNING_KEY or the backend will fail to start.",
+    "server.py: import json inside functions (export_manifest, import_manifest) — minor; move to module scope.",
+    "server.py: default pinned topics are returned from GET /pinned when pinned_topics is empty, but PUT with empty list stores [] and GET will then re-show defaults. Semantics of 'user cleared all topics' are ambiguous — consider using None vs [] or a 'has_pinned' flag.",
+    "Notes dot-bug (primary) — see backend_issues.critical."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py"
+  ],
+  "success_rate": {"backend": "93.5% (29/31)", "frontend": "~95% (all testids present; note-preview blocked by backend bug)"},
+  "seed_data_creation": "Transient sessions created per test run (TEST_ prefixed profile/topics/notes). No long-lived seed required.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The only outstanding defect is the Mongo dot-notation issue in POST /api/sessions/{id}/notes. All PWA assets (manifest.webmanifest, service-worker.js, torus-icon.svg) are served correctly from the frontend origin. Manifest export/import round-trip and signature tamper detection work. Pinned Topics CRUD + YAML download work. Frontend testids all present: manifest-card, export-manifest-btn (links to /api/sessions/{id}/manifest), import-manifest-btn, hero-pinned-link, nav-pinned, pinned-header, pinned-topic-0, topic-name-0, seed-input-0-0/0-1, add-topic-btn, add-seed-0, save-pinned-btn (toast 'Pinned topics saved' confirmed), download-pinned-btn, notes-btn-0.1, notes-textarea-0.1, notes-close-0.1.",
+  "rca of the issue": "RCA — notes persistence: In backend/server.py set_note() uses `{\"$set\": {f\"notes.{body.step_id}\": body.note}}`. MongoDB interprets '.' in field paths as sub-document traversal. Phase step IDs like '0.1', '0.2', ... therefore become nested keys (notes.0.1 → notes['0']['1']). Reproduction: POST /api/sessions/{id}/notes {step_id:'0.1', note:'hello'} → GET /api/sessions/{id} returns notes={\"0\":{\"1\":\"hello\"}}. Impact: notes do not round-trip, manifest export is lossy, frontend note preview never renders. Mitigation: sanitize the key before $set (e.g., replace '.' with '_' or '::') and reverse in all read paths (GET session, manifest export, manifest import); or store notes as a sub-array of {step_id, note} objects."
+}

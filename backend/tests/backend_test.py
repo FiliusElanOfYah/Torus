@@ -187,3 +187,141 @@ class TestBundles:
         # all 10 phase folders present
         for i in range(10):
             assert any(f"phase-{i}-" in n for n in names), f"missing phase-{i}"
+
+
+
+# ─── notes ───
+class TestNotes:
+    def test_set_note_and_persist(self, api, session_id):
+        r = api.post(
+            f"{BASE_URL}/api/sessions/{session_id}/notes",
+            json={"step_id": "0.1", "note": "TEST_note contents\nline2"},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["notes"]["0.1"] == "TEST_note contents\nline2"
+        g = api.get(f"{BASE_URL}/api/sessions/{session_id}")
+        assert g.json()["notes"]["0.1"] == "TEST_note contents\nline2"
+
+    def test_note_404(self, api):
+        r = api.post(
+            f"{BASE_URL}/api/sessions/badid/notes",
+            json={"step_id": "0.1", "note": "x"},
+        )
+        assert r.status_code == 404
+
+
+# ─── pinned ───
+class TestPinned:
+    def test_get_pinned_defaults(self, api, session_id):
+        r = api.get(f"{BASE_URL}/api/sessions/{session_id}/pinned")
+        assert r.status_code == 200
+        topics = r.json()["topics"]
+        assert isinstance(topics, list) and len(topics) >= 1
+        names = [t["name"] for t in topics]
+        assert "post-quantum-crypto" in names
+        pqc = next(t for t in topics if t["name"] == "post-quantum-crypto")
+        assert len(pqc["seeds"]) == 2
+
+    def test_put_pinned_and_persist(self, api, session_id):
+        payload = {
+            "topics": [
+                {"name": "TEST_topic-1", "seeds": ["https://a.example", "https://b.example"]},
+                {"name": "TEST_topic-2", "seeds": []},
+            ]
+        }
+        r = api.put(f"{BASE_URL}/api/sessions/{session_id}/pinned", json=payload)
+        assert r.status_code == 200
+        assert r.json()["topics"] == payload["topics"]
+        g = api.get(f"{BASE_URL}/api/sessions/{session_id}/pinned")
+        assert g.json()["topics"] == payload["topics"]
+
+    def test_pinned_yaml_download(self, api, session_id):
+        r = api.get(f"{BASE_URL}/api/sessions/{session_id}/pinned.yaml")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("application/x-yaml")
+        assert "attachment" in r.headers.get("content-disposition", "")
+        assert "pinned.yaml" in r.headers.get("content-disposition", "")
+        assert "topics:" in r.text
+
+    def test_pinned_404(self, api):
+        r = api.get(f"{BASE_URL}/api/sessions/badid/pinned")
+        assert r.status_code == 404
+
+
+# ─── manifest ───
+class TestManifest:
+    def test_export_manifest(self, api, session_id):
+        # mark a step and set a note to ensure data flows through
+        api.post(f"{BASE_URL}/api/sessions/{session_id}/steps", json={"step_id": "0.2", "verified": True})
+        api.post(f"{BASE_URL}/api/sessions/{session_id}/opsec", json={"item_id": "opsec-A", "checked": True})
+        api.post(f"{BASE_URL}/api/sessions/{session_id}/notes", json={"step_id": "0.2", "note": "TEST_manifest-note"})
+        r = api.get(f"{BASE_URL}/api/sessions/{session_id}/manifest")
+        assert r.status_code == 200
+        assert "attachment" in r.headers.get("content-disposition", "")
+        m = r.json()
+        assert m["schema"] == "torus.session.manifest/v1"
+        assert m["signature"]["algo"] == "HMAC-SHA256"
+        assert isinstance(m["signature"]["value"], str) and len(m["signature"]["value"]) == 64
+        sess = m["session"]
+        assert "0.2" in sess["verified_steps"]
+        assert "opsec-A" in sess["opsec_checked"]
+        assert sess["notes"]["0.2"] == "TEST_manifest-note"
+        assert "profile" in sess
+        assert "pinned_topics" in sess
+
+    def test_import_roundtrip(self, api, session_id):
+        m = api.get(f"{BASE_URL}/api/sessions/{session_id}/manifest").json()
+        r = api.post(f"{BASE_URL}/api/sessions/import", json={"manifest": m})
+        assert r.status_code == 200, r.text
+        new = r.json()
+        assert new["id"] != session_id
+        assert set(new["verified_steps"]) == set(m["session"]["verified_steps"])
+        assert set(new["opsec_checked"]) == set(m["session"]["opsec_checked"])
+        assert new["notes"] == m["session"]["notes"]
+        assert new["pinned_topics"] == m["session"]["pinned_topics"]
+
+    def test_import_tampered_signature(self, api, session_id):
+        m = api.get(f"{BASE_URL}/api/sessions/{session_id}/manifest").json()
+        # mutate verified_steps after export → signature should fail
+        m["session"]["verified_steps"] = m["session"]["verified_steps"] + ["0.9-tampered"]
+        r = api.post(f"{BASE_URL}/api/sessions/import", json={"manifest": m})
+        assert r.status_code == 400
+        assert "signature" in r.json()["detail"].lower()
+
+    def test_import_bad_schema(self, api):
+        r = api.post(
+            f"{BASE_URL}/api/sessions/import",
+            json={"manifest": {"schema": "wrong/v9", "session": {}, "signature": {"algo": "HMAC-SHA256", "value": "x"}}},
+        )
+        assert r.status_code == 400
+
+    def test_import_missing_signature(self, api):
+        r = api.post(
+            f"{BASE_URL}/api/sessions/import",
+            json={"manifest": {"schema": "torus.session.manifest/v1", "session": {}}},
+        )
+        assert r.status_code == 400
+
+
+# ─── PWA static assets (served by frontend; through ingress root) ───
+class TestPWA:
+    def test_manifest_webmanifest(self):
+        root = BASE_URL
+        r = requests.get(f"{root}/manifest.webmanifest", timeout=15)
+        assert r.status_code == 200, r.text
+        data = r.json()
+        for k in ("name", "short_name", "start_url", "display", "icons"):
+            assert k in data, f"missing {k}"
+        assert data["display"] == "standalone"
+        assert isinstance(data["icons"], list) and len(data["icons"]) >= 1
+
+    def test_service_worker(self):
+        r = requests.get(f"{BASE_URL}/service-worker.js", timeout=15)
+        assert r.status_code == 200
+        txt = r.text
+        assert "install" in txt and "activate" in txt and "fetch" in txt
+
+    def test_icon(self):
+        r = requests.get(f"{BASE_URL}/torus-icon.svg", timeout=15)
+        assert r.status_code == 200
+        assert "svg" in r.text.lower()

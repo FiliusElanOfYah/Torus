@@ -215,13 +215,22 @@ class NoteUpdate(BaseModel):
 
 @api.post("/sessions/{session_id}/notes")
 async def set_note(session_id: str, body: NoteUpdate):
+    # NOTE: step_ids contain '.' (e.g. "0.1"). Using {"$set": {f"notes.{step_id}": ...}}
+    # makes Mongo interpret the dot as nested-path traversal, which corrupts the shape.
+    # Read-modify-write keeps the literal key intact.
     now = datetime.now(timezone.utc).isoformat()
-    res = await db.sessions.update_one(
-        {"id": session_id},
-        {"$set": {f"notes.{body.step_id}": body.note, "updated_at": now}},
-    )
-    if res.matched_count == 0:
+    doc = await db.sessions.find_one({"id": session_id})
+    if not doc:
         raise HTTPException(status_code=404, detail="session not found")
+    notes = dict(doc.get("notes") or {})
+    if body.note:
+        notes[body.step_id] = body.note
+    else:
+        notes.pop(body.step_id, None)
+    await db.sessions.update_one(
+        {"id": session_id},
+        {"$set": {"notes": notes, "updated_at": now}},
+    )
     doc = await db.sessions.find_one({"id": session_id})
     return _deser(doc)
 
