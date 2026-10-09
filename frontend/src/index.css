@@ -1,0 +1,207 @@
+@import url('https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+    /* Tactical cockpit palette — amber phosphor on deep carbon */
+    --bg-primary: #0A0D0E;
+    --bg-secondary: #12171A;
+    --bg-card: #161D21;
+    --bg-card-hover: #1D262B;
+    --bg-command: #080B0C;
+    --border-dim: #222D33;
+    --border-bright: #3A4B54;
+    --accent-amber: #FFB000;
+    --accent-amber-dim: #8A6000;
+    --accent-emerald: #10B981;
+    --accent-cyan: #06B6D4;
+    --text-primary: #E2E8F0;
+    --text-secondary: #94A3B8;
+    --text-dim: #64748B;
+    --text-amber: #FFC02A;
+    --status-success: #10B981;
+    --status-warning: #F59E0B;
+    --status-danger: #EF4444;
+    --status-running: #3B82F6;
+
+    /* Shadcn tokens re-mapped to tactical palette */
+    --background: 200 15% 5%;
+    --foreground: 210 20% 90%;
+    --card: 200 15% 10%;
+    --card-foreground: 210 20% 90%;
+    --popover: 200 15% 8%;
+    --popover-foreground: 210 20% 92%;
+    --primary: 40 100% 50%;
+    --primary-foreground: 200 15% 5%;
+    --secondary: 200 15% 15%;
+    --secondary-foreground: 210 20% 90%;
+    --muted: 200 15% 15%;
+    --muted-foreground: 215 15% 60%;
+    --accent: 160 84% 39%;
+    --accent-foreground: 200 15% 5%;
+    --destructive: 0 85% 60%;
+    --destructive-foreground: 210 20% 95%;
+    --border: 200 15% 20%;
+    --input: 200 15% 18%;
+    --ring: 40 100% 50%;
+    --radius: 0.25rem;
+}
+
+* {
+    box-sizing: border-box;
+    border-color: hsl(var(--border));
+}
+
+html, body, #root {
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    margin: 0;
+    min-height: 100vh;
+}
+
+::selection {
+    background: var(--accent-amber);
+    color: var(--bg-primary);
+}
+
+/* CRT scanline overlay for a muted cockpit feel */
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+        to bottom,
+        rgba(255, 176, 0, 0.015) 0px,
+        rgba(255, 176, 0, 0.015) 1px,
+        transparent 1px,
+        transparent 3px
+    );
+    z-index: 1;
+}
+
+/* Diagonal corner grid behind the shell */
+body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+        linear-gradient(to right, rgba(58, 75, 84, 0.08) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(58, 75, 84, 0.08) 1px, transparent 1px);
+    background-size: 48px 48px;
+    z-index: 0;
+}
+
+#root > * {
+    position: relative;
+    z-index: 2;
+}
+
+.font-display {
+    font-family: 'Azeret Mono', 'IBM Plex Mono', monospace;
+    letter-spacing: 0.04em;
+}
+
+.font-tactical {
+    font-family: 'IBM Plex Mono', monospace;
+    letter-spacing: 0.02em;
+}
+
+.font-code {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Phosphor-amber glow for primary accents */
+.text-amber-glow {
+    color: var(--accent-amber);
+    text-shadow: 0 0 12px rgba(255, 176, 0, 0.35);
+}
+
+.border-dim { border-color: var(--border-dim); }
+.border-bright { border-color: var(--border-bright); }
+
+/* Blinking cursor */
+@keyframes torus-cursor {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0; }
+}
+.cursor-blink::after {
+    content: '▊';
+    display: inline-block;
+    margin-left: 2px;
+    animation: torus-cursor 1.1s steps(2) infinite;
+    color: var(--accent-amber);
+}
+
+@keyframes torus-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 176, 0, 0.4); }
+    50% { box-shadow: 0 0 0 6px rgba(255, 176, 0, 0); }
+}
+.pulse-amber { animation: torus-pulse 2s ease-out infinite; }
+
+@keyframes torus-reveal {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.reveal { animation: torus-reveal 0.4s ease-out both; }
+.reveal-stagger > *:nth-child(1) { animation-delay: 0.05s; }
+.reveal-stagger > *:nth-child(2) { animation-delay: 0.10s; }
+.reveal-stagger > *:nth-child(3) { animation-delay: 0.15s; }
+.reveal-stagger > *:nth-child(4) { animation-delay: 0.20s; }
+.reveal-stagger > *:nth-child(5) { animation-delay: 0.25s; }
+.reveal-stagger > *:nth-child(6) { animation-delay: 0.30s; }
+.reveal-stagger > *:nth-child(7) { animation-delay: 0.35s; }
+.reveal-stagger > *:nth-child(8) { animation-delay: 0.40s; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--border-dim); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-bright); }
+
+/* Command block */
+.command-block {
+    background: var(--bg-command);
+    border: 1px solid var(--border-dim);
+    color: var(--text-amber);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    padding: 14px 16px;
+    overflow-x: auto;
+    white-space: pre;
+    border-radius: 2px;
+}
+.command-block::before {
+    content: '$ ';
+    color: var(--accent-emerald);
+    font-weight: 600;
+}
+
+/* Hairline divider */
+.hr-tactical {
+    border: 0;
+    border-top: 1px dashed var(--border-dim);
+    margin: 16px 0;
+}
+
+/* Prevent dark-text on dark */
+input, textarea, select {
+    background: var(--bg-command);
+    color: var(--text-primary);
+    border: 1px solid var(--border-dim);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .reveal, .pulse-amber, .cursor-blink::after {
+        animation: none !important;
+    }
+}

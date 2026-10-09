@@ -1,0 +1,141 @@
+{
+  "project_name": "TORUS Phase-0/1 Setup Generator",
+  "app_type": "cli_companion_web_app",
+  "design_context": "Tactical Operations Command / Termux Mesh Bootstrap Companion",
+  "theme_strategy": "Deep Tactical Cockpit (Dark Base with Phosphor Amber & Radar Emerald Accents, high contrast grid structure, scanned CRT feel)",
+  "typography": {
+    "heading_font": "Azeret Mono, IBM Plex Mono, monospace",
+    "body_font": "JetBrains Mono, Source Code Pro, monospace",
+    "code_font": "JetBrains Mono, SFMono-Regular, Consolas, monospace",
+    "font_weights": {
+      "light": 300,
+      "regular": 400,
+      "medium": 500,
+      "semibold": 600,
+      "bold": 700
+    },
+    "text_size_hierarchy": {
+      "h1_hero": "text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight uppercase",
+      "h2_section": "text-xl sm:text-2xl lg:text-3xl font-semibold tracking-wide uppercase",
+      "h3_subsection": "text-lg sm:text-xl font-medium tracking-normal",
+      "h4_card_header": "text-base sm:text-lg font-medium",
+      "body_text": "text-sm sm:text-base leading-relaxed font-normal",
+      "small_code_label": "text-xs uppercase tracking-widest font-mono font-medium"
+    },
+    "anti_slop_font_rule": "Strictly NO Inter, NO Roboto, NO Space Grotesk. Use Azeret Mono or IBM Plex Mono for tactical telemetry headers and JetBrains Mono for body/command blocks."
+  },
+  "colors": {
+    "color_archetype": "ARCHETYPE 7: ELECTRIC & NEON (Tactical Retrofuturism / Command Cockpit)",
+    "css_variables": {
+      "bg_primary": "#0A0D0E",
+      "bg_secondary": "#12171A",
+      "bg_card": "#161D21",
+      "bg_card_hover": "#1D262B",
+      "bg_command_box": "#080B0C",
+      "border_dim": "#222D33",
+      "border_bright": "#3A4B54",
+      "accent_amber": "#FFB000",
+      "accent_amber_dim": "#8A6000",
+      "accent_emerald": "#10B981",
+      "accent_cyan": "#06B6D4",
+      "text_primary": "#E2E8F0",
+      "text_secondary": "#94A3B8",
+      "text_dim": "#64748B",
+      "text_amber": "#FFC02A",
+      "status_success": "#10B981",
+      "status_warning": "#F59E0B",
+      "status_danger": "#EF4444",
+      "status_running": "#3B82F6"
+    },
+    "tailwind_color_mappings": {
+      "brand_amber": "bg-[#FFB000] text-[#0A0D0E]",
+      "badge_verified": "bg-[#10B981]/15 text-[#10B981] border-[#10B981]/30",
+      "badge_pending": "bg-[#FFB000]/15 text-[#FFB000] border-[#FFB000]/30",
+      "badge_locked": "bg-[#64748B]/15 text-[#64748B] border-[#64748B]/30",
+      "command_block": "bg-[#080B0C] border border-[#222D33] text-[#FFC02A]"
+    },
+    "contrast_rules": "Text on buttons must always use #0A0D0E for high contrast. Command boxes use amber text (#FFC02A) over pitch charcoal (#080B0C). Avoid transparent backgrounds on dropdowns and modals."
+  },
+  "layout_and_spacing": {
+    "layout_mode": "MODE B: High Density Grid (Data-Heavy Operations Dashboard)",
+    "container_padding": "p-4 sm:p-6 lg:p-8",
+    "grid_gap": "gap-4 sm:gap-6",
+    "bento_spans": {
+      "phase_nav": "col-span-12 lg:col-span-3",
+      "main_workspace": "col-span-12 lg:col-span-9",
+      "device_profile_card": "col-span-12 md:col-span-6 lg:col-span-4",
+      "command_card": "col-span-12",
+      "mesh_topology": "col-span-12",
+      "bundle_generator": "col-span-12 lg:col-span-6"
+    },
+    "border_style": "1px solid #222D33 with sharp or subtle 4px rounded edges (`rounded-sm` or `rounded-md`). Never rounded-2xl or rounded-full for cards."
+  },
+  "component_patterns": {
+    "command_card": {
+      "structure": "Header (Step ID, Command Title, Copy Button) -> Terminal Shell (Syntax Highlighted Bash, Row Numbers) -> Expected Output Collapse -> Verification Gate (Run Command + Checkbox) -> Troubleshooting Collapsible",
+      "copy_button": "Includes animated state: 'COPY' -> 'COPIED!' with emerald check icon and temporary green border glow",
+      "data_testid": "command-card-[step_id]"
+    },
+    "phase_stepper": {
+      "structure": "Vertical or Horizontal Gated Rail (Phase 0 -> Phase 9). Locked steps are non-clickable until previous phase verification is complete. Shows progress percentage indicator [e.g. 20% VERIFIED].",
+      "states": ["COMPLETED", "ACTIVE_IN_PROGRESS", "LOCKED_GATED"],
+      "data_testid": "phase-stepper-item-[phase_number]"
+    },
+    "verification_checkbox_gate": {
+      "structure": "Dedicated verification bar at bottom of each step. Requires clicking 'Execute Verification Check' or toggling 'I verified command exit code 0' before unlocking the Next Step CTA.",
+      "data_testid": "verify-gate-step-[step_id]"
+    },
+    "daemon_mesh_node_graph": {
+      "structure": "12-daemon grid/map layout representing fetcherd, parserd, indexerd, vaultd, mongod, pageringd, summarizerd, coderd, sentineld, gatewayd, oracled, airgapd over NATS messaging layer with interactive status, bus topic labels, and role description modal.",
+      "data_testid": "daemon-mesh-node-[daemon_name]"
+    },
+    "bundle_download_card": {
+      "structure": "Phase summary card featuring file tree manifest preview (install.sh, runit unit, nats.conf, env.sample) with single-click 'BUILD & DOWNLOAD PHASE BUNDLE (.ZIP)' action button.",
+      "data_testid": "bundle-download-button-[phase_number]"
+    },
+    "opsec_audit_checklist": {
+      "structure": "Phase 8 specific OPSEC checklist covering Android storage permissions, non-root execution, quantum crypto liboqs verification, local-first airgap boundaries, and log scrubbers.",
+      "data_testid": "opsec-audit-item-[item_id]"
+    }
+  },
+  "motion_and_interactions": {
+    "hover_effects": "Subtle border highlight shift from #222D33 to #FFB000/50 with 0.15s ease-in-out transition",
+    "entrance_animations": "Staggered fade-slide-up for command cards on phase load",
+    "copy_feedback": "Flash background of command block briefly with #10B981/10 and change copy button text",
+    "phase_unlock_animation": "Glowing pulse animation on newly unlocked phase step in the navigator",
+    "accessibility_motion": "Respect prefers-reduced-motion CSS query. No infinite distracting spinning animations."
+  },
+  "media_and_assets": {
+    "image_urls": [
+      {
+        "category": "hero_background_texture",
+        "url": "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "alt": "Dark network terminal mesh hardware cabling"
+      },
+      {
+        "category": "server_racks",
+        "url": "https://images.unsplash.com/photo-1561233835-f937539b95b9?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "alt": "Data center hardware array"
+      },
+      {
+        "category": "terminal_array",
+        "url": "https://images.unsplash.com/photo-1639066648921-82d4500abf1a?crop=entropy&cs=srgb&fm=jpg&q=85",
+        "alt": "Electronic server rack hardware"
+      }
+    ],
+    "icons_library": "lucide-react (installed) and @phosphor-icons/react (install if needed)"
+  },
+  "general_ui_ux_guidelines": {
+    "testing_requirement": "EVERY interactive element (button, input, select, checkbox, tab, step link) MUST have a unique `data-testid` attribute using kebab-case conventions.",
+    "file_type_instruction": "The project uses JavaScript (.js / .jsx) files in frontend/src. All component design instructions apply to standard React JS files.",
+    "theme_toggle": "Maintains deep dark cockpit as default, with optional high-contrast amber amber-on-black terminal mode.",
+    "toast_notifications": "Use `sonner` for toast feedback on copy actions, profile savings, and ZIP generation."
+  },
+  "instructions_to_main_agent": [
+    "Build the web application using clean React JS components with Tailwind CSS and Shadcn UI primitives.",
+    "Maintain the tactical cockpit visual style: deep slate background (#0A0D0E), amber highlights (#FFB000), monospace typography (Azeret Mono / JetBrains Mono).",
+    "Implement the 10 phases (Phase 0 through Phase 9) with step-by-step verified execution checklists for Termux Samsung S26 Ultra.",
+    "Include live interactive state: copy terminal commands, mark verification checks, track device profile in Mongo/local session, render 12-daemon mesh topology map, and generate downloadable ZIP bundles containing install scripts.",
+    "Ensure every button, input, tab, and card contains a explicit `data-testid` attribute for robust end-to-end testing."
+  ]
+}

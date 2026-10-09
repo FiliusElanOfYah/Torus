@@ -1,0 +1,6 @@
+/* TORUS — minimal App-level overrides; the real styles live in index.css. */
+.App {
+    min-height: 100vh;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
