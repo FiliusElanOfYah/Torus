@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json as _json
 import logging
 import os
 import uuid
@@ -26,6 +27,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from phases import get_all_phases, get_daemons, get_phase
 from bundle import build_full_mesh_bundle, build_phase_bundle
+import pq_sign
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -33,7 +35,9 @@ load_dotenv(ROOT_DIR / ".env")
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
-SIGNING_KEY = os.environ["TORUS_SIGNING_KEY"].encode()
+# NOTE: TORUS_SIGNING_KEY is retained for emergency fallback / legacy flows, but
+# the live manifest format now uses post-quantum Dilithium3 (ML-DSA-65).
+SIGNING_KEY = os.environ.get("TORUS_SIGNING_KEY", "").encode()
 
 app = FastAPI(title="TORUS gateway")
 api = APIRouter(prefix="/api")
@@ -361,26 +365,30 @@ async def download_pinned_yaml(session_id: str):
     )
 
 
-# ─── shareable signed manifest ───
-
-
-def _sign(payload: bytes) -> str:
-    return hmac.new(SIGNING_KEY, payload, hashlib.sha256).hexdigest()
+# ─── shareable signed manifest (post-quantum: Dilithium3 / ML-DSA-65) ───
 
 
 class ManifestImport(BaseModel):
     manifest: dict
 
 
+@api.get("/pubkey")
+async def pubkey():
+    """Dilithium3 public key for pinning on the device (airgapd)."""
+    return {
+        "algo": pq_sign.ALGORITHM,
+        "fingerprint": pq_sign.fingerprint(),
+        "public_key_b64": pq_sign.public_key_b64(),
+    }
+
+
 @api.get("/sessions/{session_id}/manifest")
 async def export_manifest(session_id: str):
-    import json as _json
-
     doc = await db.sessions.find_one({"id": session_id})
     if not doc:
         raise HTTPException(status_code=404, detail="session not found")
     body = {
-        "schema": "torus.session.manifest/v1",
+        "schema": "torus.session.manifest/v2",
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "session": {
             "id": doc["id"],
@@ -393,8 +401,9 @@ async def export_manifest(session_id: str):
     }
     canonical = _json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
     body["signature"] = {
-        "algo": "HMAC-SHA256",
-        "value": _sign(canonical),
+        "algo": pq_sign.ALGORITHM,
+        "pk_fp": pq_sign.fingerprint(),
+        "value": pq_sign.sign_b64(canonical),
     }
     pretty = _json.dumps(body, indent=2, sort_keys=False)
     return Response(
@@ -408,20 +417,42 @@ async def export_manifest(session_id: str):
 
 @api.post("/sessions/import")
 async def import_manifest(body: ManifestImport):
-    import json as _json
-
     m = body.manifest
-    if m.get("schema") != "torus.session.manifest/v1":
+    schema = m.get("schema")
+    if schema not in ("torus.session.manifest/v2", "torus.session.manifest/v1"):
         raise HTTPException(status_code=400, detail="unsupported manifest schema")
     sig = m.get("signature")
-    if not sig or sig.get("algo") != "HMAC-SHA256":
-        raise HTTPException(status_code=400, detail="missing or unsupported signature")
-    provided = sig.get("value", "")
+    if not sig:
+        raise HTTPException(status_code=400, detail="missing signature")
     unsigned = {k: v for k, v in m.items() if k != "signature"}
     canonical = _json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode()
-    expected = _sign(canonical)
-    if not hmac.compare_digest(provided, expected):
-        raise HTTPException(status_code=400, detail="signature verification failed")
+
+    algo = sig.get("algo", "")
+    provided = sig.get("value", "")
+
+    if algo == pq_sign.ALGORITHM:
+        # Enforce that the manifest was signed by *this* gateway's keypair.
+        pk_fp = sig.get("pk_fp", "")
+        if pk_fp and pk_fp != pq_sign.fingerprint():
+            raise HTTPException(
+                status_code=400,
+                detail=f"manifest signed by foreign key (fp={pk_fp}); expected {pq_sign.fingerprint()}",
+            )
+        if not pq_sign.verify_b64(canonical, provided):
+            raise HTTPException(status_code=400, detail="signature verification failed")
+    elif algo == "HMAC-SHA256":
+        # Legacy v1 manifests — verify with the HMAC fallback key if configured.
+        if not SIGNING_KEY:
+            raise HTTPException(
+                status_code=400,
+                detail="legacy HMAC manifest but TORUS_SIGNING_KEY is unset",
+            )
+        expected = hmac.new(SIGNING_KEY, canonical, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(provided, expected):
+            raise HTTPException(status_code=400, detail="signature verification failed")
+    else:
+        raise HTTPException(status_code=400, detail=f"unsupported signature algo: {algo}")
+
     src = m.get("session") or {}
     new = SessionDoc()
     doc = _ser(new.model_dump())

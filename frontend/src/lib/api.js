@@ -108,6 +108,15 @@ export function manifestUrl() {
   return `${API}/sessions/${id}/manifest`;
 }
 
+export async function getPubkey() {
+  const r = await axios.get(`${API}/pubkey`);
+  return r.data;
+}
+
+export function pubkeyUrl() {
+  return `${API}/pubkey`;
+}
+
 export async function importManifest(manifest) {
   const r = await axios.post(`${API}/sessions/import`, { manifest });
   // Adopt the new session id locally.
