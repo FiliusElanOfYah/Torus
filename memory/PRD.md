@@ -8,8 +8,6 @@ daemons talk over local NATS, supervised by termux-services (runit) + Termux
 Boot. The user chose **Option C — Phase-0/1 Setup Generator**: a guided,
 copy-pasteable checklist web app that generates verified Termux install
 scripts, service unit files, and bootstrap artifacts for every phase (0 → 9).
-No live research pipeline is run here — the web app produces the artefacts the
-user runs on their phone.
 
 ## User personas
 - **Solo operator** — layman coder, non-rooted S26 Ultra, needs
@@ -23,61 +21,63 @@ user runs on their phone.
   location, LLM choice, Opus-for-code, Jev gating, etc.).
 - Per-step verification is persisted; next phase unlocks when the previous is
   100 % verified.
+- Per-step notes capture the actual terminal output and travel in the
+  manifest.
+- Phase 7 pinned-topics editor generates `~/.torus/etc/pinned.yaml`.
 - Phase 8 has a dedicated OPSEC audit (10 items).
 - Daemon-mesh topology viewer (12 daemons, 6 rings).
-- Phase bundle ZIP (`install.sh` + `README.md` + runit units + env.sample +
-  any artefacts), plus a full-mesh ZIP that includes `bootstrap-all.sh`.
-- Dark tactical cockpit aesthetic — amber phosphor + emerald, Azeret Mono /
-  JetBrains Mono.
-- Session state persisted in Mongo, resumable via `localStorage` session id.
+- Phase bundle ZIP + full-mesh ZIP with `bootstrap-all.sh`.
+- Signed shareable manifest (HMAC-SHA256) for cross-device resume.
+- Dark tactical cockpit aesthetic — amber phosphor + emerald, Azeret /
+  JetBrains Mono stack.
+- Installable PWA, offline-capable for the shell.
+- Session state in Mongo, resumable via `localStorage` session id.
 
-## What's been implemented (2026-02 · first ship)
-Backend (`/app/backend`):
-- `phases.py` — complete 10-phase catalog (64 steps) + 12-daemon registry +
-  Phase-8 OPSEC checklist.
-- `bundle.py` — per-phase and full-mesh ZIP builders (streamed from memory).
-- `server.py` — FastAPI gateway with:
-  - `GET /api/phases`, `GET /api/phases/{n}`, `GET /api/daemons`
-  - `POST /api/sessions`, `GET /api/sessions/{id}`
-  - `PATCH /api/sessions/{id}/profile`
-  - `POST /api/sessions/{id}/steps` (toggle)
-  - `POST /api/sessions/{id}/opsec` (toggle)
-  - `POST /api/sessions/{id}/notes`
-  - `GET /api/sessions/{id}/progress`
-  - `GET /api/bundle/phase/{n}`, `GET /api/bundle/mesh`
+## What's been implemented (growing log)
 
-Frontend (`/app/frontend/src`):
-- `App.js` — routes `/`, `/phase/:number`, `/mesh`, `/opsec`.
-- `pages/Dashboard.js` — hero, phase rail, device profile, phase overview.
-- `pages/PhaseDetail.js` — gated step cards + bundle download + "advance to
-  next" button.
-- `pages/Mesh.js` — 6-ring, 12-daemon grid + event-loop ASCII block.
-- `pages/Opsec.js` — 10-item hardening audit with pass banner.
-- `components/CommandCard.js`, `PhaseStepper.js`, `DeviceProfile.js`,
-  `Shell.js` — reusable primitives.
-- `lib/api.js` — axios client + localStorage session id.
-- `index.css` — tactical cockpit tokens, CRT scanline overlay, phosphor
-  typography stack.
+### 2026-02-A · first ship
+- 10-phase, 64-step catalog + 12-daemon registry + Phase-8 OPSEC checklist.
+- FastAPI gateway: phases, daemons, sessions, profile, step/opsec toggles,
+  progress rollup, per-phase + full-mesh ZIP bundles.
+- Frontend: Dashboard, PhaseDetail, Mesh, Opsec pages. Phase stepper,
+  command cards, device profile. Tactical cockpit tokens + CRT scanlines.
+- Verified: 17/17 backend tests + full Playwright flow, 100 %
+  (`/app/test_reports/iteration_1.json`).
 
-Verified end-to-end by the testing agent: 17/17 backend tests, full
-Playwright UI flow, 100 % success rate (`/app/test_reports/iteration_1.json`).
+### 2026-02-B · four-feature expansion
+- **Phase Notes Drawer** — Per-step right-side drawer with autosave textarea
+  (`POST /api/sessions/{id}/notes`); captured-output preview on the card.
+- **Pinned Topics Editor** — `/pinned` route with topic/seed CRUD + YAML
+  download (`GET /api/sessions/{id}/pinned.yaml`).
+- **Shareable Manifest** — Signed JSON export
+  (`GET /api/sessions/{id}/manifest`, HMAC-SHA256) + verifying import
+  (`POST /api/sessions/import`). Signing key in `TORUS_SIGNING_KEY`.
+- **PWA Packaging** — `manifest.webmanifest`, service worker (cache-first
+  shell / network-first `/api`), SVG icon + maskable variant, apple-touch
+  meta, SW registered on window load.
+- **Mongo dot-notation fix** — `set_note` now does read-modify-write so step
+  IDs like `0.1` are preserved as literal keys.
+- Verified: **31/31 backend tests + 100 % frontend flow**
+  (`/app/test_reports/iteration_3.json`).
 
 ## Prioritised backlog
-- **P1 — Phase-specific notes.** The backend already stores per-step notes
-  (`POST /api/sessions/{id}/notes`); surface a notes drawer per command card.
-- **P1 — Shareable manifest.** Export the session (profile + verified steps +
-  OPSEC + notes) as a signed JSON so a second device can resume.
-- **P1 — Pinned-topic editor.** UI for `~/.torus/etc/pinned.yaml` (Phase 7)
-  before you push the config to the device.
-- **P2 — Terminal replay widget.** Paste the step's actual output back into
-  the UI; store under `notes[step_id].output` for later review.
-- **P2 — Multi-device roster.** Multiple sessions in a tabbed selector so
-  future federation (Pi/VPS extension) is just another row.
-- **P3 — Dark/amber-high-contrast theme toggle.** Design guidelines already
-  spec the alt palette.
-- **P3 — PWA packaging** so this companion runs offline on the phone itself.
+- **P1 — Multi-device roster** — tabbed session selector so switching
+  between phone / laptop / Pi federations is one click.
+- **P1 — Dossier preview tab** — once the user runs Phase 3 and starts
+  producing `vault/*.md`, show a preview surface here that reads from the
+  same signed-manifest contract.
+- **P2 — Dark/amber-high-contrast theme toggle** — design guidelines already
+  spec the alt "amber-on-black terminal" palette.
+- **P2 — Deployment with custom domain** — user offered
+  `guardianandroid.app` through Cloudflare; wire it up at deploy time.
+- **P3 — End-to-end crypto on manifest** — replace HMAC-SHA256 with the
+  real Dilithium3 keypair generated in Phase 8 so the manifest is signed
+  by the same key that signs the airgap tokens.
 
 ## Decisions already fixed (per user open-decisions)
 - Vault location: internal storage (default; configurable in profile).
 - Default LLM: Sonnet 4.5 for synthesis, Opus-tier for code.
 - Jev yes/no gating inside sentineld: ON.
+- Deployment domain (offered): `guardianandroid.app` via Cloudflare —
+  wire at deploy time, no code changes needed (frontend already uses
+  `REACT_APP_BACKEND_URL` dynamically).

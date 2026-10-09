@@ -1,0 +1,22 @@
+{
+  "summary": "Iteration-3 retest after the Mongo dot-notation fix in POST /api/sessions/{id}/notes (set_note now reads session, mutates notes dict in Python, then $set the entire notes map; empty note deletes the key). Backend: full suite re-run — 31/31 pass. Specifically the two previously-failing tests now pass: TestNotes.test_set_note_and_persist (asserts notes['0.1'] literal key on POST response and GET session) and TestManifest.test_export_manifest (asserts manifest.session.notes['0.2'] literal key). TestManifest.test_import_roundtrip also passes, confirming notes survive export→import. Frontend sanity: on /phase/0 the notes drawer autosaves, and after a hard reload the note-preview-0.1 element renders with the saved text ('TEST_frontend_note contents for 0.1 iter3'). Dot-notation defect fully resolved.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": { "ui_bugs": [], "integration_issues": [], "design_issues": [] },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/test_reports/pytest/iter3_full.xml",
+    "/app/test_reports/pytest/iter3_notes_manifest.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "set_note() read-modify-write is correct for the small notes map, but is not concurrency-safe if two clients write simultaneously (last-writer-wins; previous key could be lost). Low-risk for a single-user PWA but worth noting; a $set on the whole map scoped by a doc filter including a version/updated_at, or using array-filtered updates, would harden this.",
+    "Prior review items from iter-2 still stand (SIGNING_KEY no fallback = good; `import json` inside functions = minor; pinned defaults vs explicit empty list semantics are still ambiguous)."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "100% (31/31)", "frontend": "100% on notes flow (preview renders with persisted text after reload)" },
+  "seed_data_creation": "Only transient TEST_-prefixed data created by backend tests and the one Playwright notes write.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Notes dot-notation bug fully resolved; all 31 backend tests green and UI note-preview round-trips through reload. Backend test file at /app/backend/tests/backend_test.py is the canonical regression suite (phases, daemons, sessions CRUD + progress/opsec/steps, bundles, notes, pinned, signed manifest export/import/tamper, PWA assets).",
+  "rca of the issue": "Fix verified: set_note() in server.py now does read-modify-write — loads the session doc, mutates notes[step_id] in Python (deleting the key when note is empty), then $set the full notes map in Mongo. This avoids Mongo's interpretation of '.' in dotted $set paths as sub-document traversal, which previously stored notes['0.1'] as nested notes['0']['1']. Verified by (a) TestNotes.test_set_note_and_persist asserting notes['0.1'] literal key via GET session, (b) TestManifest.test_export_manifest asserting manifest.session.notes['0.2'] literal key, (c) TestManifest.test_import_roundtrip asserting new['notes'] == original manifest notes, and (d) Playwright: typing in notes-textarea-0.1 → closing drawer → reloading → note-preview-0.1 renders the saved text."
+}
