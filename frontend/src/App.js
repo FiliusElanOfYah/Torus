@@ -6,6 +6,7 @@ import Dashboard from "@/pages/Dashboard";
 import PhaseDetail from "@/pages/PhaseDetail";
 import Mesh from "@/pages/Mesh";
 import Opsec from "@/pages/Opsec";
+import Pinned from "@/pages/Pinned";
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="/" element={<Dashboard />} />
           <Route path="/phase/:number" element={<PhaseDetail />} />
           <Route path="/mesh" element={<Mesh />} />
+          <Route path="/pinned" element={<Pinned />} />
           <Route path="/opsec" element={<Opsec />} />
         </Routes>
       </BrowserRouter>

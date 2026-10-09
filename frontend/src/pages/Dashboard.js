@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { ensureSession, getPhases, getProgress } from "../lib/api";
 import PhaseStepper from "../components/PhaseStepper";
 import DeviceProfile from "../components/DeviceProfile";
+import ManifestCard from "../components/ManifestCard";
 import Shell from "../components/Shell";
-import { ArrowRight, Download, Hexagon } from "lucide-react";
+import { ArrowRight, Download, Hexagon, Radar } from "lucide-react";
 import { Link } from "react-router-dom";
 
 export default function Dashboard() {
@@ -100,6 +101,19 @@ export default function Dashboard() {
               <Hexagon size={14} />
               <span>Daemon Mesh</span>
             </Link>
+            <Link
+              to="/pinned"
+              className="flex items-center gap-2 px-4 py-2 border font-tactical text-xs uppercase tracking-widest hover:text-amber-glow"
+              style={{
+                borderColor: "var(--border-bright)",
+                color: "var(--text-secondary)",
+                background: "var(--bg-card)",
+              }}
+              data-testid="hero-pinned-link"
+            >
+              <Radar size={14} />
+              <span>Pinned Topics</span>
+            </Link>
           </div>
         </section>
 
@@ -128,11 +142,21 @@ export default function Dashboard() {
 
         {/* Grid: Profile + Phase overview */}
         <section className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-2 flex flex-col gap-6">
             {session && (
               <DeviceProfile
                 initial={session.profile}
                 onSaved={(s) => setSession(s)}
+              />
+            )}
+            {session && (
+              <ManifestCard
+                sessionId={session.id}
+                onImported={async (s) => {
+                  setSession(s);
+                  const pr = await getProgress();
+                  setProgress(pr);
+                }}
               />
             )}
           </div>

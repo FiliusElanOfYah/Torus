@@ -7,6 +7,8 @@ verification progress in Mongo, and streams per-phase bundle ZIPs.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import os
 import uuid
@@ -14,6 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+import yaml
 from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import Response
@@ -30,6 +33,7 @@ load_dotenv(ROOT_DIR / ".env")
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
+SIGNING_KEY = os.environ["TORUS_SIGNING_KEY"].encode()
 
 app = FastAPI(title="TORUS gateway")
 api = APIRouter(prefix="/api")
@@ -69,6 +73,7 @@ class SessionDoc(BaseModel):
     verified_steps: list[str] = Field(default_factory=list)
     opsec_checked: list[str] = Field(default_factory=list)
     notes: dict[str, str] = Field(default_factory=dict)
+    pinned_topics: list[dict] = Field(default_factory=list)
 
 
 def _ser(obj: Any) -> Any:
@@ -279,6 +284,145 @@ async def progress(session_id: str):
         },
         "phases": per_phase,
     }
+
+
+# ─── pinned topics (oracled seed config) ───
+
+
+class PinnedTopic(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    name: str
+    seeds: list[str] = Field(default_factory=list)
+
+
+class PinnedUpdate(BaseModel):
+    topics: list[PinnedTopic]
+
+
+DEFAULT_PINNED_TOPICS: list[dict] = [
+    {
+        "name": "post-quantum-crypto",
+        "seeds": [
+            "https://openquantumsafe.org/",
+            "https://pq-crystals.org/",
+        ],
+    }
+]
+
+
+@api.get("/sessions/{session_id}/pinned")
+async def get_pinned(session_id: str):
+    doc = await db.sessions.find_one({"id": session_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="session not found")
+    topics = doc.get("pinned_topics") or DEFAULT_PINNED_TOPICS
+    return {"topics": topics}
+
+
+@api.put("/sessions/{session_id}/pinned")
+async def set_pinned(session_id: str, body: PinnedUpdate):
+    now = datetime.now(timezone.utc).isoformat()
+    topics = [t.model_dump() for t in body.topics]
+    res = await db.sessions.update_one(
+        {"id": session_id},
+        {"$set": {"pinned_topics": topics, "updated_at": now}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="session not found")
+    return {"topics": topics}
+
+
+@api.get("/sessions/{session_id}/pinned.yaml")
+async def download_pinned_yaml(session_id: str):
+    doc = await db.sessions.find_one({"id": session_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="session not found")
+    topics = doc.get("pinned_topics") or DEFAULT_PINNED_TOPICS
+    payload = {"topics": topics}
+    body = (
+        "# TORUS — oracled pinned-topics config\n"
+        "# Drop this at ~/.torus/etc/pinned.yaml on the device.\n"
+        "# oracled wakes once per hour and refills the vault for every seed.\n\n"
+        + yaml.safe_dump(payload, sort_keys=False, default_flow_style=False)
+    )
+    return Response(
+        content=body,
+        media_type="application/x-yaml",
+        headers={"Content-Disposition": 'attachment; filename="pinned.yaml"'},
+    )
+
+
+# ─── shareable signed manifest ───
+
+
+def _sign(payload: bytes) -> str:
+    return hmac.new(SIGNING_KEY, payload, hashlib.sha256).hexdigest()
+
+
+class ManifestImport(BaseModel):
+    manifest: dict
+
+
+@api.get("/sessions/{session_id}/manifest")
+async def export_manifest(session_id: str):
+    import json as _json
+
+    doc = await db.sessions.find_one({"id": session_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="session not found")
+    body = {
+        "schema": "torus.session.manifest/v1",
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "session": {
+            "id": doc["id"],
+            "profile": doc.get("profile", {}),
+            "verified_steps": sorted(doc.get("verified_steps") or []),
+            "opsec_checked": sorted(doc.get("opsec_checked") or []),
+            "notes": doc.get("notes") or {},
+            "pinned_topics": doc.get("pinned_topics") or [],
+        },
+    }
+    canonical = _json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+    body["signature"] = {
+        "algo": "HMAC-SHA256",
+        "value": _sign(canonical),
+    }
+    pretty = _json.dumps(body, indent=2, sort_keys=False)
+    return Response(
+        content=pretty,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="torus-session-{doc["id"][:8]}.json"'
+        },
+    )
+
+
+@api.post("/sessions/import")
+async def import_manifest(body: ManifestImport):
+    import json as _json
+
+    m = body.manifest
+    if m.get("schema") != "torus.session.manifest/v1":
+        raise HTTPException(status_code=400, detail="unsupported manifest schema")
+    sig = m.get("signature")
+    if not sig or sig.get("algo") != "HMAC-SHA256":
+        raise HTTPException(status_code=400, detail="missing or unsupported signature")
+    provided = sig.get("value", "")
+    unsigned = {k: v for k, v in m.items() if k != "signature"}
+    canonical = _json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode()
+    expected = _sign(canonical)
+    if not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=400, detail="signature verification failed")
+    src = m.get("session") or {}
+    new = SessionDoc()
+    doc = _ser(new.model_dump())
+    doc["profile"] = {**doc["profile"], **(src.get("profile") or {})}
+    doc["verified_steps"] = list(src.get("verified_steps") or [])
+    doc["opsec_checked"] = list(src.get("opsec_checked") or [])
+    doc["notes"] = dict(src.get("notes") or {})
+    doc["pinned_topics"] = list(src.get("pinned_topics") or [])
+    await db.sessions.insert_one(doc)
+    return _deser(doc)
 
 
 app.include_router(api)

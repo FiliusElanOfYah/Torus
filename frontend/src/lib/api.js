@@ -81,3 +81,44 @@ export function phaseBundleUrl(number) {
 export function fullBundleUrl() {
   return `${API}/bundle/mesh`;
 }
+
+// ─── Phase 7 — pinned topics ───
+
+export async function getPinnedTopics() {
+  const id = getSessionId();
+  const r = await axios.get(`${API}/sessions/${id}/pinned`);
+  return r.data.topics;
+}
+
+export async function savePinnedTopics(topics) {
+  const id = getSessionId();
+  const r = await axios.put(`${API}/sessions/${id}/pinned`, { topics });
+  return r.data.topics;
+}
+
+export function pinnedYamlUrl() {
+  const id = getSessionId();
+  return `${API}/sessions/${id}/pinned.yaml`;
+}
+
+// ─── Shareable manifest ───
+
+export function manifestUrl() {
+  const id = getSessionId();
+  return `${API}/sessions/${id}/manifest`;
+}
+
+export async function importManifest(manifest) {
+  const r = await axios.post(`${API}/sessions/import`, { manifest });
+  // Adopt the new session id locally.
+  localStorage.setItem("torus.session_id", r.data.id);
+  return r.data;
+}
+
+// ─── Notes ───
+
+export async function saveNote(step_id, note) {
+  const id = getSessionId();
+  const r = await axios.post(`${API}/sessions/${id}/notes`, { step_id, note });
+  return r.data;
+}

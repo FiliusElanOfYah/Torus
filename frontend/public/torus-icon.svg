@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#0A0D0E"/>
+  <rect x="12" y="12" width="488" height="488" fill="none" stroke="#222D33" stroke-width="2"/>
+  <g transform="translate(256 256)">
+    <ellipse cx="0" cy="0" rx="150" ry="52" fill="none" stroke="#FFB000" stroke-width="10"/>
+    <ellipse cx="0" cy="0" rx="150" ry="52" fill="none" stroke="#FFB000" stroke-width="10" transform="rotate(60)"/>
+    <ellipse cx="0" cy="0" rx="150" ry="52" fill="none" stroke="#FFB000" stroke-width="10" transform="rotate(120)"/>
+    <circle cx="0" cy="0" r="18" fill="#10B981"/>
+  </g>
+  <text x="256" y="470" text-anchor="middle" font-family="monospace" font-size="40" font-weight="700" fill="#FFB000" letter-spacing="8">TORUS</text>
+</svg>

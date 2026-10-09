@@ -1,0 +1,26 @@
+{
+  "name": "TORUS Setup Flight Manual",
+  "short_name": "TORUS",
+  "description": "Local-first guided checklist that generates verified Termux install scripts for the TORUS daemon mesh.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#FFB000",
+  "background_color": "#0A0D0E",
+  "categories": ["developer", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "/torus-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/torus-icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

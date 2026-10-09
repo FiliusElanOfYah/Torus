@@ -172,7 +172,9 @@ export default function PhaseDetail() {
               step={step}
               index={i}
               verified={verifiedSet.has(step.id)}
+              note={(session?.notes || {})[step.id] || ""}
               onVerify={onVerify}
+              onNoteSaved={(s) => setSession(s)}
             />
           ))}
         </section>

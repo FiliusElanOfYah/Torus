@@ -1,9 +1,10 @@
 import { NavLink, Link } from "react-router-dom";
-import { Activity, Hexagon, ShieldAlert, Download, Terminal, Cpu } from "lucide-react";
+import { Activity, Hexagon, ShieldAlert, Download, Terminal, Cpu, Radar } from "lucide-react";
 
 const navItems = [
   { to: "/", label: "COMMAND", icon: Terminal, testId: "nav-dashboard" },
   { to: "/mesh", label: "DAEMON MESH", icon: Hexagon, testId: "nav-mesh" },
+  { to: "/pinned", label: "PINNED TOPICS", icon: Radar, testId: "nav-pinned" },
   { to: "/opsec", label: "OPSEC AUDIT", icon: ShieldAlert, testId: "nav-opsec" },
 ];
 
