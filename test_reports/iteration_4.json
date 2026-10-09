@@ -1,0 +1,19 @@
+{
+  "summary": "Iteration 4 (Dilithium3 / ML-DSA-65 PQ signing swap). Updated backend_test.py to v2 schema + PQ tests. All 34 backend tests pass. Verified pubkey shape (algo='ML-DSA-65 (Dilithium3)', 12-char hex fingerprint, pk base64 decodes to 1952 bytes), manifest signature (3309-byte sig, pk_fp matches /api/pubkey), round-trip, tamper detection ('signature verification failed'), foreign pk_fp rejection ('foreign key'), missing signature, unknown algo ('unsupported signature algo: RSA-9000'), unsupported schema ('torus.session.manifest/v99'). Gateway fingerprint persists across `supervisorctl restart backend` (84eeb4ca7ccb unchanged). Frontend ManifestCard renders 'Dilithium3 · PQ' badge, toggle-pubkey-btn reveals pubkey-panel with matching fingerprint and 2604-char base64 key, copy-pubkey-btn fires toast, export+import e2e produces 'Imported · new session' toast.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": ["/app/backend/tests/backend_test.py", "/app/test_reports/pytest/iter4_results.xml"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "pq_sign.py exposes a module-level singleton (_keyring) and lazy-loads from disk — good. Private key written with best-effort chmod 600; on docker overlay FS this may silently stay world-readable. Consider logging a warning when chmod fails so operators notice.",
+    "server.py: 'hashlib' and 'hmac' imports are now only used by the legacy HMAC-SHA256 fallback path; fine but noteworthy if TORUS_SIGNING_KEY is intentionally never set in prod (dead-ish branch).",
+    "The legacy v1 manifest branch does not enforce a pk_fp (HMAC has no key fingerprint). That's correct, but worth documenting: v1 manifests are only guarded by TORUS_SIGNING_KEY secrecy.",
+    "import_manifest adopts manifest verified_steps/notes/opsec/pinned verbatim with no size/shape validation (no cap on list sizes or note length) — potential DoS vector if the endpoint is ever exposed to untrusted callers beyond the signed-manifest flow."
+  ],
+  "updated_files": ["/app/backend/tests/backend_test.py"],
+  "success_rate": {"backend": "100% (34/34)", "frontend": "100%"},
+  "seed_data_creation": "Transient test sessions created via POST /api/sessions during pytest (TEST_ prefixed data where applicable).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Gateway Dilithium3 fingerprint on this env = 84eeb4ca7ccb. Keys persisted at /app/backend/.pq_keys/dilithium3.{pk,sk}. Legacy HMAC path requires TORUS_SIGNING_KEY env var (unset here, so legacy path intentionally not exercised). Backend test file is pytest-based and covers all /api endpoints including the new /api/pubkey + v2 manifest signature flow."
+}

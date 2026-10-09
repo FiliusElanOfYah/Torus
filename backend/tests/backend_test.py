@@ -248,10 +248,31 @@ class TestPinned:
         assert r.status_code == 404
 
 
-# ─── manifest ───
+# ─── post-quantum pubkey + manifest (Dilithium3 / ML-DSA-65) ───
+import base64
+
+PQ_ALGO = "ML-DSA-65 (Dilithium3)"
+PQ_PK_BYTES = 1952
+PQ_SIG_BYTES = 3309
+
+
+class TestPubkey:
+    def test_pubkey_shape(self, api):
+        r = api.get(f"{BASE_URL}/api/pubkey")
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["algo"] == PQ_ALGO
+        fp = d["fingerprint"]
+        assert isinstance(fp, str) and len(fp) == 12
+        assert all(c in "0123456789abcdef" for c in fp)
+        pk_b64 = d["public_key_b64"]
+        assert isinstance(pk_b64, str)
+        raw = base64.b64decode(pk_b64, validate=True)
+        assert len(raw) == PQ_PK_BYTES, f"pk size {len(raw)} != {PQ_PK_BYTES}"
+
+
 class TestManifest:
     def test_export_manifest(self, api, session_id):
-        # mark a step and set a note to ensure data flows through
         api.post(f"{BASE_URL}/api/sessions/{session_id}/steps", json={"step_id": "0.2", "verified": True})
         api.post(f"{BASE_URL}/api/sessions/{session_id}/opsec", json={"item_id": "opsec-A", "checked": True})
         api.post(f"{BASE_URL}/api/sessions/{session_id}/notes", json={"step_id": "0.2", "note": "TEST_manifest-note"})
@@ -259,9 +280,14 @@ class TestManifest:
         assert r.status_code == 200
         assert "attachment" in r.headers.get("content-disposition", "")
         m = r.json()
-        assert m["schema"] == "torus.session.manifest/v1"
-        assert m["signature"]["algo"] == "HMAC-SHA256"
-        assert isinstance(m["signature"]["value"], str) and len(m["signature"]["value"]) == 64
+        assert m["schema"] == "torus.session.manifest/v2"
+        sig = m["signature"]
+        assert sig["algo"] == PQ_ALGO
+        # pk_fp must match /api/pubkey
+        pk = api.get(f"{BASE_URL}/api/pubkey").json()
+        assert sig["pk_fp"] == pk["fingerprint"]
+        raw_sig = base64.b64decode(sig["value"], validate=True)
+        assert len(raw_sig) == PQ_SIG_BYTES, f"sig size {len(raw_sig)} != {PQ_SIG_BYTES}"
         sess = m["session"]
         assert "0.2" in sess["verified_steps"]
         assert "opsec-A" in sess["opsec_checked"]
@@ -270,6 +296,11 @@ class TestManifest:
         assert "pinned_topics" in sess
 
     def test_import_roundtrip(self, api, session_id):
+        # set pinned topics too, so round-trip covers all persisted fields
+        api.put(
+            f"{BASE_URL}/api/sessions/{session_id}/pinned",
+            json={"topics": [{"name": "TEST_roundtrip", "seeds": ["https://x.example"]}]},
+        )
         m = api.get(f"{BASE_URL}/api/sessions/{session_id}/manifest").json()
         r = api.post(f"{BASE_URL}/api/sessions/import", json={"manifest": m})
         assert r.status_code == 200, r.text
@@ -282,25 +313,40 @@ class TestManifest:
 
     def test_import_tampered_signature(self, api, session_id):
         m = api.get(f"{BASE_URL}/api/sessions/{session_id}/manifest").json()
-        # mutate verified_steps after export → signature should fail
         m["session"]["verified_steps"] = m["session"]["verified_steps"] + ["0.9-tampered"]
         r = api.post(f"{BASE_URL}/api/sessions/import", json={"manifest": m})
         assert r.status_code == 400
-        assert "signature" in r.json()["detail"].lower()
+        assert "signature verification failed" in r.json()["detail"].lower()
 
-    def test_import_bad_schema(self, api):
-        r = api.post(
-            f"{BASE_URL}/api/sessions/import",
-            json={"manifest": {"schema": "wrong/v9", "session": {}, "signature": {"algo": "HMAC-SHA256", "value": "x"}}},
-        )
+    def test_import_foreign_pk_fp(self, api, session_id):
+        m = api.get(f"{BASE_URL}/api/sessions/{session_id}/manifest").json()
+        m["signature"]["pk_fp"] = "deadbeef1234"
+        r = api.post(f"{BASE_URL}/api/sessions/import", json={"manifest": m})
         assert r.status_code == 400
+        assert "foreign key" in r.json()["detail"].lower()
 
     def test_import_missing_signature(self, api):
         r = api.post(
             f"{BASE_URL}/api/sessions/import",
-            json={"manifest": {"schema": "torus.session.manifest/v1", "session": {}}},
+            json={"manifest": {"schema": "torus.session.manifest/v2", "session": {}}},
         )
         assert r.status_code == 400
+        assert "missing signature" in r.json()["detail"].lower()
+
+    def test_import_unknown_algo(self, api, session_id):
+        m = api.get(f"{BASE_URL}/api/sessions/{session_id}/manifest").json()
+        m["signature"]["algo"] = "RSA-9000"
+        r = api.post(f"{BASE_URL}/api/sessions/import", json={"manifest": m})
+        assert r.status_code == 400
+        assert "unsupported signature algo" in r.json()["detail"].lower()
+        assert "rsa-9000" in r.json()["detail"].lower()
+
+    def test_import_bad_schema(self, api, session_id):
+        m = api.get(f"{BASE_URL}/api/sessions/{session_id}/manifest").json()
+        m["schema"] = "torus.session.manifest/v99"
+        r = api.post(f"{BASE_URL}/api/sessions/import", json={"manifest": m})
+        assert r.status_code == 400
+        assert "unsupported manifest schema" in r.json()["detail"].lower()
 
 
 # ─── PWA static assets (served by frontend; through ingress root) ───
