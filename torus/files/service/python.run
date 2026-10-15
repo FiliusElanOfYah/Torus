@@ -1,0 +1,11 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# TORUS service @NAME@. Written by `torus install`. Edit torus/files/service/python.run in the repo, not this copy.
+export HOME=/data/data/com.termux/files/home
+export PREFIX=/data/data/com.termux/files/usr
+export PATH=/data/data/com.termux/files/usr/bin:/data/data/com.termux/files/home/.torus/bin
+export TMPDIR=/data/data/com.termux/files/usr/tmp
+export SVDIR=/data/data/com.termux/files/usr/var/service
+export LANG=en_US.UTF-8
+export PYTHONUNBUFFERED=1
+exec 2>&1
+exec /data/data/com.termux/files/home/.torus/venv/bin/python /data/data/com.termux/files/home/.torus/bin/@NAME@.py

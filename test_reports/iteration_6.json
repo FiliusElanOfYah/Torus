@@ -1,0 +1,39 @@
+{
+  "summary": "TORUS phase 7 features (coder, follow-ups, citation map, PDF report) exhaustively tested with fake_llm stand-in. 22/22 pytest assertions pass in /app/backend/tests/test_torus_new_features.py. Follow-ups: POST /api/jobs/{id}/followup rejects empty question (400) and bad model (400); fake_llm 'Messages seen' counter grows 1 -> 3 -> 5 across base + two follow-ups; dossier .md contains both 'Follow-up:' sections. Citation map: GET /api/jobs/{id}/citations returns ranking/edges/shared/sources_with_links with correct shape; the Torus/Klein/Mobius trio produces page edges between all three wiki pages (6 page edges) and promotes a shared outlink (Surface (topology)) to a 4th ranked source; after restarting the mesh to pick up the fresh torus_cite.py the shared list is empty for Wikipedia jobs (wikipedia.org / wikimedia.org / wikidata.org / mediawiki.org / wikimediafoundation.org are now in JUNK). PDF report: POST /api/jobs/{id}/report writes to /tmp/torus-test/vault/reports/<id>-<slug>.pdf; GET report.pdf returns Content-Type application/pdf + Content-Disposition attachment + %PDF- magic; pypdf extracts the question, 'Follow-up' section and 'Sources' heading. Unicode handling: emoji \ud83d\ude80 and CJK \u4e2d\u6587 do not crash pypdf extraction - they are stripped/encoded, not raised. Code API: /api/code/* returns 401 without X-Torus-Token; project create accepts 'demo' and rejects '../x', '/abs', '.', '..'; quick run returns exit 1 and output for 'echo hi; false' and timed_out=true for sleep10/timeout5; the auto_fix loop runs apply -> run exit 1 -> auto-fix -> run exit 0 and reaches status 'done' with runs [1,0]; rollback moves to status 'rolled_back'; reject moves to 'rejected'; review action='boom' returns 400. Path safety on NATS subject torus.code.write: coderd refuses '../escape.txt', '/etc/passwd', '.git/HEAD', '.git/config' with ok=false. Web UI (390x844): #t=TOKEN;/<route> correctly stores token in localStorage and strips the token from the hash; #/code without a token shows data-testid=code-locked; with token, all 13 Code tab controls render; project-select + quick-run shows 'exit 0 ... UI-OK'; task page shows code-task-status 'rejected', proposal diff and log; job page (done) shows followup-card -> submits follow-up answer-1 inside 5s, citation-map-button opens citation-map with 4 ranks and 4 citation-edge rows, report-save-button writes PDF and reveals report-path + report-download-link. All 36 required testIDs are present in /tmp/torus-test/web/index.html. Installer: `torus install 7` twice in fake env (HOME=/tmp/fh PREFIX=/tmp/fp) wrote 7 files on first run and 0 files on the second (every entry becomes 'same' or 'kept yours'); `torus files` lists coderd.py as current. (Phase 1-6 install hangs on sv/runit which is absent in the fake env - noted as environment limitation, not a bug; previous iteration already covered phase 1-3 install.) Settings reset to llm_enabled=false and anthropic key file deleted at end.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/settings", "issue": "Still exposes fictional default model IDs claude-opus-5-5 / claude-sonnet-5-5. Carried over from iteration 5; user can override via `torus llm id` but defaults will 404 against the real Anthropic API. Reference: /app/torus/files/bin/gatewayd.py llm settings defaults."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_torus_new_features.py",
+    "/app/test_reports/pytest/iter6_torus_new.xml"
+  ],
+  "action_items": [
+    "No functional fixes required for phase 7. Consider shipping real Anthropic model IDs (carryover from iter5).",
+    "run_local_mesh.sh copies /app/torus/files/bin/*.py into /tmp/torus-test/bin/ only on `start` - testers must restart the mesh after editing files/bin/torus_cite.py (or any other daemon) or the running mesh keeps serving the old copy. Not a bug, but worth a one-line note in the test harness."
+  ],
+  "critical_code_review_comments": [
+    "gateway_code.py cleanly separates read/think/review/apply/run loop; EVENTS/RUNNING dicts correctly keyed by task id; INTERRUPTIBLE/ACTIVE sets handle restart recovery.",
+    "torus_cite.py JUNK list now includes wikipedia/wikimedia/wikidata/mediawiki/wikimediafoundation - correctly removes boilerplate from `shared` without filtering legitimate inter-source edges (which use direct URL match, not site).",
+    "clean_path() correctly rejects '/', '..', and '.git' segments; coderd.py (torus.code.write handler) refuses the same, giving defense in depth.",
+    "fake_llm.py as a NATS subscriber on torus.llm.egress is a nice no-code-fix way to run the coder/followup loops offline - keep it in tests/.",
+    "Code tab is guarded on both frontend (code-locked state) and backend (X-Torus-Token on every /api/code/* route) - good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_torus_new_features.py (new - phase 7 regression suite, 22 asserts)"
+  ],
+  "success_rate": {"backend": "100% (22/22)", "frontend": "100% on all tested UI flows (code-locked gate, token hash flow, code tab controls, quick-run, task page, follow-up submit, citation map, PDF save+download)"},
+  "seed_data_creation": "Jobs TEST_followups/TEST_citations/TEST_report, UI_TEST citation+report job in /tmp/torus-test/var/jobs; dossiers under /tmp/torus-test/vault/answers; PDFs under /tmp/torus-test/vault/reports; code tasks (TEST_create/TEST_rb/TEST_cancel) in /tmp/torus-test/var/code; coder project /tmp/torus-test/projects/demo with hello.py (after auto_fix) and README.md.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Mesh running under TORUS_HOME=/tmp/torus-test (gateway http://127.0.0.1:7777, X-Torus:1 on POST). Gateway token at /tmp/torus-test/etc/gateway.token (code APIs need X-Torus-Token header). Fake Anthropic LLM at /app/torus/tests/fake_llm.py - start it after mesh restart with: pkill -f /tmp/torus-test/bin/llmd.py && nohup /tmp/tv/bin/python /app/torus/tests/fake_llm.py >/tmp/torus-test/logs/fake_llm.log 2>&1 & . Enable LLM: printf 'sk-ant-fake\\n' > /tmp/torus-test/airgap/anthropic.key; chmod 600 it; POST /api/settings {llm_enabled:true}. IMPORTANT: run_local_mesh.sh overwrites /tmp/torus-test/bin/*.py from /app/torus/files/bin/ on each start - restart the mesh after any code edit. Regression suite at /app/backend/tests/test_torus_new_features.py (requires pytest-xdist, pytest-asyncio, pypdf, nats-py; all in /tmp/tv venv). Settings reset at end: llm_enabled=false, anthropic key file deleted.",
+  "rca_of_issue": "N/A - no new failures. One carryover (fictional model IDs) left for the main agent."
+}

@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>TORUS</title>
+<style>
+:root{--bg:#0b0d0c;--panel:#131715;--line:#25302b;--text:#e7ece9;--dim:#8b9a92;--amber:#ffb000;--green:#2fd67b;--red:#ff5d5d;--blue:#7cc4ff;
+--mono:ui-monospace,"JetBrains Mono","Fira Code",Menlo,monospace;--sans:system-ui,-apple-system,"Segoe UI",sans-serif}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 var(--sans)}
+header{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--line);padding:calc(env(safe-area-inset-top) + 10px) 16px 0;z-index:5}
+.brand{display:flex;align-items:center;gap:10px;font:700 18px var(--mono);letter-spacing:.2em;color:var(--amber)}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--red)}.dot.on{background:var(--green)}
+.meta{margin-left:auto;font:12px var(--mono);color:var(--dim);letter-spacing:0}
+nav{display:flex;gap:4px;margin-top:10px;overflow-x:auto}
+nav a{flex-shrink:0;padding:10px 14px;font:600 13px var(--mono);color:var(--dim);text-decoration:none;border-bottom:2px solid transparent;text-transform:uppercase;letter-spacing:.08em}
+nav a.on{color:var(--amber);border-color:var(--amber)}
+main{padding:16px;max-width:860px;margin:0 auto;padding-bottom:calc(env(safe-area-inset-bottom) + 32px)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
+label{display:block;font:600 12px var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:12px 0 6px}
+textarea,input[type=text],select{width:100%;background:#0e1211;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:12px;font:15px var(--sans)}
+textarea{min-height:88px;resize:vertical}textarea.mono{font:13px var(--mono)}
+button{min-height:44px;padding:0 18px;border-radius:8px;border:1px solid var(--line);background:#1b221f;color:var(--text);font:600 14px var(--mono);cursor:pointer}
+button.primary{background:var(--amber);color:#111;border-color:var(--amber)}button.danger{color:var(--red)}
+button:active{transform:scale(.98)}button:disabled{opacity:.5}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;border-radius:0;background:transparent;color:var(--dim);flex:1}.seg button.on{background:#25302b;color:var(--amber)}
+.pill{display:inline-block;padding:2px 10px;border-radius:999px;font:600 12px var(--mono);border:1px solid currentColor}
+.s-done,.s-ok{color:var(--green)}.s-needs_you{color:var(--amber)}.s-error,.s-cancelled{color:var(--red)}
+.s-running,.s-thinking,.s-fetching,.s-searching,.s-queued,.s-pending{color:var(--blue)}.s-robots,.s-skipped{color:var(--dim)}
+.job{display:block;padding:12px 0;border-bottom:1px solid var(--line);color:var(--text);text-decoration:none}
+.job small{display:block;color:var(--dim);font:12px var(--mono)}
+.need{border-color:var(--amber)}.need h3{margin:0 0 6px;color:var(--amber);font:700 14px var(--mono)}
+.src{padding:10px 0;border-bottom:1px solid var(--line)}.src a{color:var(--blue);word-break:break-all}
+.src details{margin-top:6px;color:var(--dim);font-size:13px}
+.warn{color:var(--amber);font-size:14px;margin:4px 0}
+.answer h1,.answer h2,.answer h3{font-size:17px;color:var(--amber);margin:16px 0 6px}
+.answer pre{background:#0e1211;border:1px solid var(--line);padding:12px;border-radius:8px;overflow-x:auto;font:13px var(--mono)}
+.answer code{font:13px var(--mono);background:#0e1211;padding:1px 4px;border-radius:4px}
+.answer a{color:var(--blue)}.cite{font:600 12px var(--mono);color:var(--amber);text-decoration:none}
+.log{font:12px var(--mono);color:var(--dim);white-space:pre-wrap;max-height:180px;overflow:auto}
+.svc{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);font:13px var(--mono)}
+.hint{color:var(--dim);font-size:14px}code.k{font:13px var(--mono);color:var(--amber)}
+#toast{position:fixed;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom) + 16px);background:#222b27;border:1px solid var(--amber);padding:12px 16px;border-radius:8px;display:none;z-index:9}
+.turn{border-left:3px solid var(--amber);padding-left:12px}
+.diff{background:#0e1211;border:1px solid var(--line);border-radius:8px;overflow-x:auto;font:12px/1.45 var(--mono);padding:8px 0;max-height:420px;overflow-y:auto}
+.diff div{white-space:pre;padding:0 10px}.diff .a{color:var(--green);background:#0f2a1c}.diff .r{color:var(--red);background:#2a1212}.diff .h{color:var(--blue)}
+.out{background:#0e1211;border:1px solid var(--line);border-radius:8px;padding:10px;font:12px var(--mono);white-space:pre-wrap;max-height:360px;overflow:auto}
+.bar{height:6px;border-radius:3px;background:var(--amber);margin-top:4px}
+.btnlink{display:inline-flex;align-items:center;min-height:44px;padding:0 18px;border-radius:8px;border:1px solid var(--line);background:#1b221f;color:var(--text);font:600 14px var(--mono);text-decoration:none}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span class="dot" id="mesh-dot" data-testid="mesh-status-dot"></span>TORUS<span class="meta" id="mesh-meta" data-testid="mesh-status-text">connecting...</span></div>
+  <nav>
+    <a href="#/ask" data-tab="ask" data-testid="nav-ask">Ask</a>
+    <a href="#/jobs" data-tab="jobs" data-testid="nav-jobs">Jobs</a>
+    <a href="#/code" data-tab="code" data-testid="nav-code">Code</a>
+    <a href="#/vault" data-tab="vault" data-testid="nav-vault">Vault</a>
+    <a href="#/settings" data-tab="settings" data-testid="nav-settings">Settings</a>
+  </nav>
+</header>
+<main id="view"></main>
+<div id="toast" data-testid="toast"></div>
+<script>
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let settings = null, pollTimer = null, askMode = null;
+(() => { // `torus open` passes the code token in the URL fragment: #t=<token>;/job/<id>
+  const m = location.hash.match(/^#t=([0-9a-f]*)(?:;(.*))?$/);
+  if (m) { if (m[1]) localStorage.setItem("torus_token", m[1]); history.replaceState(null, "", "#" + (m[2] || "/ask")); }
+})();
+
+async function api(path, body) {
+  const o = {headers: {"X-Torus": "1", "X-Torus-Token": localStorage.getItem("torus_token") || ""}};
+  if (body !== undefined) { o.method = "POST"; o.headers["Content-Type"] = "application/json"; o.body = JSON.stringify(body); }
+  const r = await fetch(path, o);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+  return j;
+}
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 3500); }
+const when = t => new Date(t * 1000).toLocaleString();
+
+function md(src) {
+  const blocks = []; let s = esc(src).replace(/```[a-z]*\n([\s\S]*?)```/g, (_, c) => { blocks.push(c); return "\u0000" + (blocks.length - 1) + "\u0000"; });
+  const inline = t => t.replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/\[(\d{1,2})\]/g, '<a class="cite" href="#" data-cite="$1">[$1]</a>');
+  return s.split(/\n{2,}/).map(b => {
+    if (/^\u0000\d+\u0000$/.test(b.trim())) return "<pre>" + blocks[+b.trim().slice(1, -1)] + "</pre>";
+    const h = b.match(/^(#{1,3})\s+(.*)/); if (h) return `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`;
+    const lines = b.split("\n");
+    if (lines.every(l => /^\s*([-*]|\d+\.)\s+/.test(l))) return "<ul>" + lines.map(l => "<li>" + inline(l.replace(/^\s*([-*]|\d+\.)\s+/, "")) + "</li>").join("") + "</ul>";
+    return "<p>" + inline(b).replace(/\n/g, "<br>") + "</p>";
+  }).join("").replace(/\u0000(\d+)\u0000/g, (_, i) => "<pre>" + blocks[+i] + "</pre>");
+}
+
+async function health() {
+  try { const h = await api("/api/health"); $("#mesh-dot").classList.toggle("on", h.nats); $("#mesh-meta").textContent = (h.nats ? "mesh online" : "mesh offline") + " | " + h.running + " running"; }
+  catch { $("#mesh-dot").classList.remove("on"); $("#mesh-meta").textContent = "gateway offline"; }
+}
+
+async function viewAsk() {
+  settings = settings || await api("/api/settings");
+  askMode = askMode || settings.search_mode;
+  $("#view").innerHTML = `
+  <div class="card">
+    <label for="q">Question</label>
+    <textarea id="q" data-testid="ask-question-input" placeholder="What do you want to research?"></textarea>
+    <label for="urls">URLs (one per line, optional)</label>
+    <textarea id="urls" class="mono" data-testid="ask-urls-input" placeholder="https://..."></textarea>
+    <label>Sources</label>
+    <div class="seg" id="mode" data-testid="ask-mode-toggle">
+      ${["urls","brave","both"].map(m => `<button type="button" data-m="${m}" data-testid="ask-mode-${m}" class="${m===askMode?"on":""}">${m==="urls"?"Pasted URLs":m==="brave"?"Brave Search":"Both"}</button>`).join("")}
+    </div>
+    ${(askMode !== "urls" && !settings.keys.brave) ? `<p class="warn" data-testid="ask-brave-key-warning">No Brave key yet. Run <code class="k">torus key set brave</code> in Termux.</p>` : ""}
+    <label for="model">Model</label>
+    <select id="model" data-testid="ask-model-select">
+      <option value="">Default (${esc(settings.model)})</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option>
+    </select>
+    <p class="hint" data-testid="ask-llm-state">LLM is <b>${settings.llm_enabled ? "ON" : "OFF"}</b>${settings.llm_enabled && !settings.keys.anthropic ? " but no key is stored" : ""}. When off, TORUS writes a local summary instead.</p>
+    <div class="row"><label style="margin:0;display:flex;gap:8px;align-items:center;text-transform:none"><input type="checkbox" id="fresh" data-testid="ask-fresh-checkbox"> Ignore cache</label></div>
+    <div class="row" style="margin-top:12px"><button class="primary" id="go" data-testid="ask-submit-button">Ask TORUS</button></div>
+  </div>`;
+  $("#mode").onclick = e => { const m = e.target.dataset.m; if (m) { askMode = m; viewAsk(); } };
+  $("#go").onclick = async () => {
+    const question = $("#q").value.trim(); if (!question) return toast("Type a question first");
+    $("#go").disabled = true;
+    try { const r = await api("/api/ask", {question, urls: $("#urls").value.split(/\s+/).filter(Boolean), mode: askMode, model: $("#model").value || null, fresh: $("#fresh").checked}); location.hash = "#/job/" + r.id; }
+    catch (e) { toast(e.message); $("#go").disabled = false; }
+  };
+}
+
+async function viewJobs() {
+  const r = await api("/api/jobs");
+  $("#view").innerHTML = `<div class="card" data-testid="jobs-list">${r.jobs.length ? r.jobs.map(j => `
+    <a class="job" href="#/job/${j.id}" data-testid="job-row-${j.id}"><span class="pill s-${j.status}">${j.status === "needs_you" ? "Needs you" : j.status}</span> ${esc(j.question)}
+    <small>${when(j.created)} ${j.engine ? "| " + esc(j.engine) : ""}</small></a>`).join("") : `<p class="hint" data-testid="jobs-empty">No jobs yet. Ask something.</p>`}</div>`;
+}
+
+function needCard(s, jid) {
+  return `<div class="card need" data-testid="needs-you-card-${s.n}">
+    <h3>[${s.n}] ${s.status === "robots" ? "Blocked by robots.txt (optional)" : "Needs you"}</h3>
+    <p class="hint">${esc(s.reason)}</p>
+    <p>1. <a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer" data-testid="needs-you-open-${s.n}">Open the page in Brave</a> and pass the check.<br>
+    2. Select all the article text, copy it, and paste it below. Or save the page (Share, then Download page) and pick the file.</p>
+    <textarea class="mono" id="paste-${s.n}" data-testid="needs-you-paste-${s.n}" placeholder="Paste the page here"></textarea>
+    <div class="row" style="margin-top:8px">
+      <input type="file" id="file-${s.n}" accept=".html,.htm,.txt,.md,.mhtml" data-testid="needs-you-file-${s.n}">
+      <button class="primary" data-act="paste" data-n="${s.n}" data-testid="needs-you-submit-${s.n}">Use this page</button>
+      <button data-act="skip" data-n="${s.n}" data-testid="needs-you-skip-${s.n}">Skip</button>
+    </div></div>`;
+}
+
+async function viewJob(id) {
+  const j = await api("/api/jobs/" + id);
+  const open = document.activeElement && document.activeElement.id && /^(paste-|fu-)/.test(document.activeElement.id);
+  if (open) return j; // don't wipe what you are typing
+  const needs = j.sources.filter(s => s.status === "needs_you" || (s.status === "robots"));
+  const done = ["done", "error", "cancelled"].includes(j.status);
+  $("#view").innerHTML = `
+  <div class="card">
+    <div class="row"><span class="pill s-${j.status}" data-testid="job-status">${j.status === "needs_you" ? "Needs you" : j.status}</span>
+      <span class="hint">${esc(j.engine || "")}</span></div>
+    <h2 style="margin:10px 0 0;font-size:19px" data-testid="job-question">${esc(j.question)}</h2>
+    ${j.warnings.map(w => `<p class="warn" data-testid="job-warning">${esc(w)}</p>`).join("")}
+    ${j.error ? `<p class="warn s-error" data-testid="job-error">${esc(j.error)}</p>` : ""}
+  </div>
+  ${j.sources.some(s => s.status === "needs_you") ? `<div class="row" style="margin-bottom:12px"><button data-act="skipall" data-testid="needs-you-skip-all">Continue without the waiting pages</button></div>` : ""}
+  ${needs.map(s => needCard(s, j.id)).join("")}
+  ${j.answer ? `<div class="card answer" data-testid="job-answer">${md(j.answer)}
+     ${j.answer_path ? `<p class="hint" data-testid="job-answer-path">Saved: ${esc(j.answer_path)}</p>` : ""}</div>` : ""}
+  ${(j.followups || []).map((t, i) => `<div class="card answer turn" data-testid="followup-${i + 1}">
+     <label style="margin-top:0">Follow-up ${i + 1}${t.engine ? " | " + esc(t.engine) : ""}</label>
+     <h3 style="margin:4px 0 8px;font-size:16px" data-testid="followup-question-${i + 1}">${esc(t.question)}</h3>
+     ${(t.warnings || []).map(w => `<p class="warn">${esc(w)}</p>`).join("")}
+     ${t.answer ? `<div data-testid="followup-answer-${i + 1}">${md(t.answer)}</div>` : `<p class="hint">Working on it...</p>`}</div>`).join("")}
+  ${done ? `<div class="card" data-testid="followup-card"><label style="margin-top:0" for="fu-q">Ask a follow-up (reuses these sources)</label>
+     <textarea id="fu-q" data-testid="followup-question-input" placeholder="e.g. How does that compare to a sphere?"></textarea>
+     <label for="fu-urls">Extra URLs (optional, one per line)</label>
+     <textarea id="fu-urls" class="mono" data-testid="followup-urls-input" placeholder="https://..."></textarea>
+     <div class="row" style="margin-top:10px"><select id="fu-model" data-testid="followup-model-select" style="width:auto">
+       <option value="">Default model</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option></select>
+       <button class="primary" data-act="follow" data-testid="followup-submit-button">Ask follow-up</button></div></div>
+   <div class="card"><div class="row">
+     <button data-act="cites" data-testid="citation-map-button">Citation map</button>
+     <button data-act="report" data-testid="report-save-button">Save PDF to vault</button>
+     <a class="btnlink" href="/api/jobs/${j.id}/report.pdf" download data-testid="report-download-link">Download PDF</a></div>
+     ${j.report_path ? `<p class="hint" data-testid="report-path">Last PDF: ${esc(j.report_path)}</p>` : ""}
+     <div id="cmap" data-testid="citation-map"></div></div>` : ""}
+  <div class="card"><label style="margin-top:0">Sources</label>
+    ${j.sources.length ? j.sources.map(s => `<div class="src" id="src-${s.n}" data-testid="job-source-${s.n}">
+      <span class="pill s-${s.status}">${s.status === "needs_you" ? "needs you" : s.status}</span> <b>[${s.n}]</b> ${esc(s.title || "")}
+      <div><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.url)}</a> <span class="hint">${esc(s.origin)}${s.chars ? " | " + s.chars + " chars" : ""}</span></div>
+      ${s.error ? `<div class="warn">${esc(s.error)}</div>` : ""}
+      ${s.preview ? `<details><summary>preview</summary>${esc(s.preview)}</details>` : ""}</div>`).join("") : `<p class="hint">No sources yet.</p>`}
+  </div>
+  <div class="card"><div class="row">
+    ${done ? `<button data-act="rerun" data-model="sonnet" data-testid="job-rerun-sonnet">Re-answer with Sonnet</button><button data-act="rerun" data-model="opus" data-testid="job-rerun-opus">Re-answer with Opus</button>`
+           : `<button class="danger" data-act="cancel" data-testid="job-cancel-button">Cancel</button>`}
+  </div><label>Log</label><div class="log" data-testid="job-log">${esc(j.log.join("\n"))}</div></div>`;
+  $("#view").onclick = async e => {
+    const c = e.target.closest("[data-cite]"); if (c) { e.preventDefault(); const el = $("#src-" + c.dataset.cite); if (el) el.scrollIntoView({behavior: "smooth"}); return; }
+    const add = e.target.closest("[data-addurl]"); if (add) { const f = $("#fu-urls"); f.value = (f.value.trim() + "\n" + add.dataset.addurl).trim(); f.scrollIntoView({behavior: "smooth"}); toast("Added to the follow-up URLs"); return; }
+    const b = e.target.closest("button[data-act]"); if (!b) return;
+    if (b.dataset.act === "cites") { await showCitations(j.id); return; }
+    b.disabled = true;
+    try {
+      if (b.dataset.act === "follow") {
+        const question = $("#fu-q").value.trim(); if (!question) { b.disabled = false; return toast("Type the follow-up question"); }
+        await api(`/api/jobs/${j.id}/followup`, {question, urls: $("#fu-urls").value.split(/\s+/).filter(Boolean), model: $("#fu-model").value || null});
+        document.activeElement.blur();
+      } else if (b.dataset.act === "report") { const r = await api(`/api/jobs/${j.id}/report`, {}); toast("PDF saved: " + r.path); }
+      else if (b.dataset.act === "paste") {
+        const n = +b.dataset.n, f = $("#file-" + n).files[0];
+        const content = f ? await f.text() : $("#paste-" + n).value;
+        await api(`/api/jobs/${j.id}/paste`, {n, content}); toast("Page added");
+      } else if (b.dataset.act === "skip") await api(`/api/jobs/${j.id}/skip`, {n: +b.dataset.n});
+      else if (b.dataset.act === "skipall") await api(`/api/jobs/${j.id}/skip`, {all: true});
+      else if (b.dataset.act === "rerun") { await api(`/api/jobs/${j.id}/rerun`, {model: b.dataset.model}); toast("Re-answering with " + b.dataset.model); }
+      else if (b.dataset.act === "cancel") await api(`/api/jobs/${j.id}/cancel`, {});
+    } catch (err) { toast(err.message); }
+    route();
+  };
+  return j;
+}
+
+async function showCitations(id) {
+  const m = await api(`/api/jobs/${id}/citations`);
+  const max = Math.max(1, ...m.ranking.map(r => r.score));
+  $("#cmap").innerHTML = `
+    <label>Strongest references</label>
+    <p class="hint">Score = 3 x pages that link to it + 1 x sites that link to it + times the answer cites it. ${m.sources_with_links} of ${m.ranking.length} sources had links to compare.</p>
+    ${m.ranking.map(r => `<div class="src" data-testid="citation-rank-${r.n}"><b>[${r.n}]</b> ${esc(r.title)} <span class="hint">score ${r.score}</span>
+      <div class="hint">linked by ${r.linked_by} source(s), site linked by ${r.site_linked_by}, cited ${r.answer_cites}x in answers, links out to ${r.links_out}${r.has_links ? "" : " | no links captured"}</div>
+      <div class="bar" style="width:${Math.max(2, 100 * r.score / max)}%"></div></div>`).join("")}
+    <label>Who links to whom</label>
+    ${m.edges.length ? m.edges.map(e => `<div class="hint" data-testid="citation-edge">[${e.from}] &rarr; [${e.to}] ${e.kind === "page" ? "links to the page" : "links to its site"}</div>`).join("") : `<p class="hint">None of your sources link to each other.</p>`}
+    <label>Pages several sources point to</label>
+    ${m.shared.length ? m.shared.map(x => `<div class="src" data-testid="citation-shared"><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.url)}</a>
+      <div class="row"><span class="hint">linked by ${x.by.map(n => "[" + n + "]").join(" ")}</span><button data-addurl="${esc(x.url)}" data-testid="citation-add-source">Use in follow-up</button></div></div>`).join("") : `<p class="hint">No outside page is shared by 2+ sources.</p>`}`;
+}
+
+const diffHtml = d => `<div class="diff">${esc(d).split("\n").map(l => `<div class="${l.startsWith("+++") || l.startsWith("---") || l.startsWith("@@") ? "h" : l.startsWith("+") ? "a" : l.startsWith("-") ? "r" : ""}">${l || " "}</div>`).join("")}</div>`;
+const codeLocked = e => /token/i.test(e.message) ? `<div class="card"><p class="warn" data-testid="code-locked">Code is locked. In Termux run <code class="k">torus open</code> once. It unlocks this browser with your private token.</p></div>` : `<div class="card"><p class="warn" data-testid="view-error">${esc(e.message)}</p></div>`;
+
+async function viewCode() {
+  let p, ts;
+  try { [p, ts] = await Promise.all([api("/api/code/projects"), api("/api/code/tasks")]); }
+  catch (e) { $("#view").innerHTML = codeLocked(e); return; }
+  const opts = p.projects.map(x => `<option value="${esc(x.name)}">${esc(x.name)} (${x.files} files)</option>`).join("");
+  $("#view").innerHTML = `
+  <div class="card"><label style="margin-top:0">New code task</label>
+    <p class="hint">Projects live in <code class="k">${esc(p.root)}</code>. Claude proposes whole files, you review the diff, TORUS writes them (backed up) and runs your command. If it fails, Claude gets the error and proposes a fix.</p>
+    <label for="c-proj">Project</label>
+    <div class="row"><select id="c-proj" data-testid="code-project-select" style="flex:1">${opts || `<option value="">(no projects yet)</option>`}</select></div>
+    <div class="row" style="margin-top:8px"><input type="text" id="c-new" placeholder="new-project-name" data-testid="code-new-project-input" style="flex:1"><button data-act="newproj" data-testid="code-new-project-button">Create</button></div>
+    <label for="c-ins">What should it write or fix?</label>
+    <textarea id="c-ins" data-testid="code-instruction-input" placeholder="e.g. Write a script that renames my photos by date. Or: fix the crash in main.py"></textarea>
+    <label for="c-run">Run command to check it (optional)</label>
+    <input type="text" id="c-run" class="mono" data-testid="code-run-command-input" placeholder="python main.py   or   bash test.sh">
+    <label for="c-focus">Files to focus on (optional)</label>
+    <input type="text" id="c-focus" data-testid="code-focus-input" placeholder="main.py, utils/io.py">
+    <div class="row" style="margin-top:10px">
+      <select id="c-att" data-testid="code-attempts-select" style="width:auto">${[1,2,3,4,5].map(n => `<option value="${n}" ${n===3?"selected":""}>${n} attempt${n>1?"s":""}</option>`).join("")}</select>
+      <select id="c-model" data-testid="code-model-select" style="width:auto"><option value="">Default model</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option></select>
+    </div>
+    <label style="display:flex;gap:8px;align-items:center;text-transform:none"><input type="checkbox" id="c-auto" data-testid="code-autofix-checkbox"> Apply fixes without asking (after you approve the first change)</label>
+    <div class="row" style="margin-top:12px"><button class="primary" data-act="task" data-testid="code-task-submit-button">Start task</button></div></div>
+  <div class="card"><label style="margin-top:0" for="c-qcmd">Quick run (no AI)</label>
+    <div class="row"><input type="text" id="c-qcmd" class="mono" data-testid="code-quick-run-input" placeholder="ls -la" style="flex:1"><button data-act="qrun" data-testid="code-quick-run-button">Run</button></div>
+    <div id="c-qout" data-testid="code-quick-run-output"></div></div>
+  <div class="card" data-testid="code-task-list"><label style="margin-top:0">Recent tasks</label>
+    ${ts.tasks.length ? ts.tasks.map(t => `<a class="job" href="#/task/${t.id}" data-testid="code-task-row-${t.id}"><span class="pill s-${t.status === "review" ? "needs_you" : t.status === "failed" || t.status === "rejected" ? "error" : t.status}">${t.status === "review" ? "Review" : t.status}</span> ${esc(t.instruction)}<small>${esc(t.project)} | ${when(t.created)}</small></a>`).join("") : `<p class="hint">No tasks yet.</p>`}</div>`;
+  $("#view").onclick = async e => {
+    const b = e.target.closest("button[data-act]"); if (!b) return; b.disabled = true;
+    try {
+      if (b.dataset.act === "newproj") { const r = await api("/api/code/projects", {name: $("#c-new").value.trim()}); toast("Created " + r.name); await viewCode(); $("#c-proj").value = r.name; return; }
+      if (b.dataset.act === "qrun") {
+        $("#c-qout").innerHTML = `<p class="hint">running...</p>`;
+        const r = await api("/api/code/run", {project: $("#c-proj").value, cmd: $("#c-qcmd").value});
+        $("#c-qout").innerHTML = `<p class="hint">exit ${r.exit}${r.timed_out ? " (timed out)" : ""} in ${r.duration}s</p><div class="out">${esc(r.output || "(no output)")}</div>`;
+      }
+      if (b.dataset.act === "task") {
+        const r = await api("/api/code/tasks", {project: $("#c-proj").value, instruction: $("#c-ins").value, run_cmd: $("#c-run").value,
+          focus: $("#c-focus").value, max_attempts: +$("#c-att").value, auto_fix: $("#c-auto").checked, model: $("#c-model").value || null});
+        location.hash = "#/task/" + r.id;
+      }
+    } catch (err) { toast(err.message); }
+    b.disabled = false;
+  };
+}
+
+async function viewTask(id) {
+  let t; try { t = await api("/api/code/tasks/" + id); } catch (e) { $("#view").innerHTML = codeLocked(e); return {status: "error"}; }
+  if (document.activeElement && document.activeElement.id === "rv-note") return t;
+  const p = t.proposals[t.proposals.length - 1];
+  const finished = !t.running;
+  $("#view").innerHTML = `
+  <div class="card"><div class="row"><span class="pill s-${t.status === "review" ? "needs_you" : ["failed","rejected","interrupted"].includes(t.status) ? "error" : t.status}" data-testid="code-task-status">${t.status === "review" ? "Review" : t.status}</span>
+    <span class="hint">${esc(t.project)} | attempt ${t.attempt + 1} of ${t.max_attempts}${t.engine ? " | " + esc(t.engine) : ""}</span></div>
+    <h2 style="margin:10px 0 0;font-size:18px" data-testid="code-task-instruction">${esc(t.instruction)}</h2>
+    ${t.run_cmd ? `<p class="hint">check with <code class="k">${esc(t.run_cmd)}</code></p>` : ""}
+    ${t.error ? `<p class="warn s-error" data-testid="code-task-error">${esc(t.error)}</p>` : ""}</div>
+  ${p ? `<div class="card answer" data-testid="code-proposal"><label style="margin-top:0">Plan ${p.decided !== "pending" ? "(" + esc(p.decided) + ")" : ""}</label>${md(p.plan || "(no plan text)")}
+    ${p.problems.map(x => `<p class="warn">${esc(x)}</p>`).join("")}
+    ${p.changes.map((c, i) => `<label data-testid="code-change-${i}">${c.action === "delete" ? "DELETE" : c.is_new ? "NEW" : "EDIT"} ${esc(c.path)} <span class="s-ok">+${c.added}</span> <span class="s-error">-${c.removed}</span></label>${c.action === "delete" ? "" : diffHtml(c.diff)}`).join("")}
+    ${t.status === "review" ? `<label for="rv-note">Want changes? Say what (optional)</label><textarea id="rv-note" data-testid="code-review-note" placeholder="e.g. use argparse, keep it under 100 lines"></textarea>
+      <div class="row" style="margin-top:10px"><button class="primary" data-act="apply" data-testid="code-review-apply">Apply${t.run_cmd ? " and run" : ""}</button>
+      <button data-act="revise" data-testid="code-review-revise">Ask for changes</button><button class="danger" data-act="reject" data-testid="code-review-reject">Reject</button></div>` : ""}</div>` : ""}
+  ${t.runs.slice().reverse().map(r => `<div class="card" data-testid="code-run-${r.attempt}"><label style="margin-top:0">Run (attempt ${r.attempt + 1}): <span class="${r.exit === 0 && !r.timed_out ? "s-ok" : "s-error"}">exit ${r.exit}${r.timed_out ? " timed out" : ""}</span> in ${r.duration}s</label><div class="out">${esc(r.output || "(no output)")}</div></div>`).join("")}
+  <div class="card"><div class="row">
+    ${finished ? (t.applied && t.status !== "rolled_back" ? `<button class="danger" data-act="rollback" data-testid="code-task-rollback">Undo all changes</button>` : "") : `<button class="danger" data-act="cancel" data-testid="code-task-cancel">Cancel</button>`}
+    <a class="btnlink" href="#/code" data-testid="code-back-link">Back to Code</a></div>
+    <label>Log</label><div class="log" data-testid="code-task-log">${esc(t.log.join("\n"))}</div></div>`;
+  $("#view").onclick = async e => {
+    const b = e.target.closest("button[data-act]"); if (!b) return; b.disabled = true;
+    try {
+      const a = b.dataset.act;
+      if (a === "apply" || a === "reject" || a === "revise") { const n = $("#rv-note") ? $("#rv-note").value : ""; if (a === "revise" && !n.trim()) { b.disabled = false; return toast("Say what to change"); }
+        document.activeElement.blur(); await api(`/api/code/tasks/${t.id}/review`, {action: a, note: n}); }
+      if (a === "cancel") await api(`/api/code/tasks/${t.id}/cancel`, {});
+      if (a === "rollback") { const r = await api(`/api/code/tasks/${t.id}/rollback`, {}); toast(`Restored ${r.restored.length}, removed ${r.removed.length}`); }
+    } catch (err) { toast(err.message); }
+    route();
+  };
+  return t;
+}
+
+async function viewVault() {
+  $("#view").innerHTML = `<div class="card"><label style="margin-top:0" for="vq">Search your index</label>
+    <div class="row"><input type="text" id="vq" data-testid="vault-search-input" placeholder="words..." style="flex:1"><button class="primary" id="vgo" data-testid="vault-search-button">Search</button></div></div>
+    <div id="vres" data-testid="vault-results"></div>`;
+  const go = async () => {
+    try { const r = await api("/api/search?q=" + encodeURIComponent($("#vq").value));
+      $("#vres").innerHTML = `<div class="card">${(r.results || []).map(x => `<div class="src"><b>${esc(x.title)}</b><div><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.url)}</a></div><div class="hint">${esc(x.snippet)}</div></div>`).join("") || `<p class="hint">No matches.</p>`}</div>`;
+    } catch (e) { toast(e.message); }
+  };
+  $("#vgo").onclick = go; $("#vq").onkeydown = e => { if (e.key === "Enter") go(); };
+}
+
+async function viewSettings() {
+  const st = await api("/api/status"); settings = st.settings; const s = settings;
+  $("#view").innerHTML = `
+  <div class="card"><label style="margin-top:0">Claude (your Anthropic key)</label>
+    <div class="seg" data-testid="settings-llm-toggle"><button data-llm="1" class="${s.llm_enabled?"on":""}" data-testid="settings-llm-on">On</button><button data-llm="0" class="${!s.llm_enabled?"on":""}" data-testid="settings-llm-off">Off</button></div>
+    <label>Default model</label>
+    <div class="seg" data-testid="settings-model-toggle"><button data-model="sonnet" class="${s.model==="sonnet"?"on":""}" data-testid="settings-model-sonnet">Sonnet</button><button data-model="opus" class="${s.model==="opus"?"on":""}" data-testid="settings-model-opus">Opus</button></div>
+    <p class="hint">Model id in use: <code class="k" data-testid="settings-model-id">${esc(s.model_id)}</code>. Change it with <code class="k">torus llm id sonnet &lt;id&gt;</code>. List valid ids: <code class="k">torus llm models</code></p>
+    <p class="hint" data-testid="settings-anthropic-key">Anthropic key: <b class="${s.keys.anthropic?"s-ok":"s-error"}">${s.keys.anthropic?"stored":"not set"}</b>. Keys never go into the browser. Set one in Termux with <code class="k">torus key set anthropic</code></p></div>
+  <div class="card"><label style="margin-top:0">Default sources for questions</label>
+    <div class="seg" data-testid="settings-search-toggle">${["urls","brave","both"].map(m=>`<button data-search="${m}" class="${s.search_mode===m?"on":""}" data-testid="settings-search-${m}">${m==="urls"?"Pasted URLs":m==="brave"?"Brave Search":"Both"}</button>`).join("")}</div>
+    <p class="hint" data-testid="settings-brave-key">Brave Search key: <b class="${s.keys.brave?"s-ok":"s-error"}">${s.keys.brave?"stored":"not set"}</b>. Set one with <code class="k">torus key set brave</code></p></div>
+  <div class="card" data-testid="settings-services"><label style="margin-top:0">Services</label>
+    ${st.services.map(x=>`<div class="svc" data-testid="service-${x.name}"><span>${x.name}</span><span class="${x.state==="run"?"s-ok":"s-error"}">${esc(x.state)}</span></div>`).join("")}
+    <p class="hint">Fix anything red with <code class="k">torus doctor</code> in Termux.</p></div>`;
+  $("#view").onclick = async e => {
+    const b = e.target.closest("button"); if (!b) return; let body = null;
+    if (b.dataset.llm) body = {llm_enabled: b.dataset.llm === "1"};
+    if (b.dataset.model) body = {model: b.dataset.model};
+    if (b.dataset.search) { body = {search_mode: b.dataset.search}; askMode = b.dataset.search; }
+    if (!body) return;
+    try { settings = await api("/api/settings", body); toast("Saved"); viewSettings(); } catch (err) { toast(err.message); }
+  };
+}
+
+async function route() {
+  clearTimeout(pollTimer);
+  const [, tab, id] = (location.hash || "#/ask").split("/");
+  document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === (tab === "job" ? "jobs" : tab === "task" ? "code" : tab || "ask")));
+  try {
+    if (tab === "job" && id) {
+      const j = await viewJob(id);
+      if (!["done", "error", "cancelled"].includes(j.status)) pollTimer = setTimeout(route, 2000);
+    } else if (tab === "task" && id) {
+      const t = await viewTask(id);
+      if (t.running) pollTimer = setTimeout(route, 2000);
+    } else if (tab === "code") await viewCode();
+    else if (tab === "jobs") await viewJobs();
+    else if (tab === "vault") await viewVault();
+    else if (tab === "settings") await viewSettings();
+    else await viewAsk();
+  } catch (e) { $("#view").innerHTML = `<div class="card"><p class="warn" data-testid="view-error">${esc(e.message)}</p></div>`; }
+}
+window.addEventListener("hashchange", () => { $("#view").onclick = null; route(); });
+route(); health(); setInterval(health, 5000);
+</script>
+</body>
+</html>

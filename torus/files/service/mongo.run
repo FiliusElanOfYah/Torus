@@ -1,0 +1,16 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# TORUS service @NAME@: MongoDB 7 inside the proot Ubuntu guest.
+# Only written if you have no torus-mongo service yet (yours already works).
+# The TERM trap shuts mongod down cleanly. A plain `exec` leaves an orphan mongod behind.
+export HOME=/data/data/com.termux/files/home
+export PREFIX=/data/data/com.termux/files/usr
+export PATH=/data/data/com.termux/files/usr/bin
+export TMPDIR=/data/data/com.termux/files/usr/tmp
+exec 2>&1
+DB=/data/data/com.termux/files/home/.torus/mongo/data
+mkdir -p "$DB"
+/data/data/com.termux/files/usr/bin/proot-distro login ubuntu --bind "$DB:/torus-mongo-data" -- \
+  mongod --bind_ip 127.0.0.1 --port 27017 --dbpath /torus-mongo-data &
+CHILD=$!
+trap '/data/data/com.termux/files/usr/bin/proot-distro login ubuntu --bind "$DB:/torus-mongo-data" -- mongod --dbpath /torus-mongo-data --shutdown; wait $CHILD; exit 0' TERM INT
+wait $CHILD

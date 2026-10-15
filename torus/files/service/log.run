@@ -1,0 +1,3 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# TORUS log runner for @NAME@: logs rotate at 1 MB, 5 files kept (see config in the log folder)
+exec /data/data/com.termux/files/usr/bin/svlogd -tt /data/data/com.termux/files/home/.torus/logs/@NAME@

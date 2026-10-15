@@ -1,0 +1,27 @@
+# TORUS manifest: every file `torus install` owns or seeds.
+#
+# columns:  phase  policy  mode  source(under torus/files)  destination
+#   H: = ~/.torus     U: = your home (~)     P: = $PREFIX
+#   own  = TORUS owns it. The whole file is rewritten (never appended) and the old copy is backed up first.
+#   keep = it's yours. Written only if missing. `torus install N --force` replaces it (with a backup).
+0 own  0644 bin/torus_common.py     H:bin/torus_common.py
+0 own  0755 bin/torusctl.py         H:bin/torusctl.py
+1 keep 0644 etc/nats.conf           H:etc/nats.conf
+1 own  0755 boot/00-torus-start     U:.termux/boot/00-torus-start
+3 own  0755 bin/fetcherd.py         H:bin/fetcherd.py
+3 own  0755 bin/parserd.py          H:bin/parserd.py
+3 own  0755 bin/indexerd.py         H:bin/indexerd.py
+3 own  0755 bin/vaultd.py           H:bin/vaultd.py
+4 own  0755 bin/summarizerd.py      H:bin/summarizerd.py
+5 own  0755 bin/airgapd.py          H:bin/airgapd.py
+5 own  0755 bin/sentineld.py        H:bin/sentineld.py
+5 own  0755 bin/llmd.py             H:bin/llmd.py
+5 keep 0644 etc/llm.toggle          H:etc/llm.toggle
+6 keep 0644 etc/search.conf         H:etc/search.conf
+6 own  0755 bin/gatewayd.py         H:bin/gatewayd.py
+6 own  0644 bin/gateway_code.py     H:bin/gateway_code.py
+6 own  0644 bin/torus_cite.py       H:bin/torus_cite.py
+6 own  0644 bin/torus_report.py     H:bin/torus_report.py
+6 own  0644 web/index.html          H:web/index.html
+7 own  0755 bin/coderd.py           H:bin/coderd.py
+7 keep 0644 etc/coder.conf          H:etc/coder.conf

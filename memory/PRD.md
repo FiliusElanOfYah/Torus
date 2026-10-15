@@ -81,3 +81,24 @@ scripts, service unit files, and bootstrap artifacts for every phase (0 → 9).
 - Deployment domain (offered): `guardianandroid.app` via Cloudflare —
   wire at deploy time, no code changes needed (frontend already uses
   `REACT_APP_BACKEND_URL` dynamically).
+
+### 2026-10-10 · Self-building foundation (torus/ folder)
+- Source of truth now lives in the repo under `torus/`: canonical daemons (files/bin), web page, runit templates, configs.
+- `torus` CLI: doctor, install <0-6|all> [--force], update (git pull + install all), files (drift/CRLF), backups, rollback, status, logs, restart, open, ask, job, search, selftest ingest|llm, key set|rm|status, llm on|off|model|id|test|models, search mode|count.
+- Safe writer (lib/common.sh): whole-file writes, CRLF stripped, backup to ~/.torus/backups/<stamp>, skip if identical, own/keep policy (nats/mongo/llm.toggle/search.conf = keep).
+- Fixed gaps: indexerd dedupe (startup + per-url replace), error-wrapped handlers in every daemon, svlogd rotation 1MB x5, rotating sentineld/airgapd/llmd JSONL, honest UA with contact URL (Wikipedia 403 fix), robots.txt, 3s per-host rate limit, 24h cache.
+- Phase 6 gatewayd: stdlib HTTP server on 127.0.0.1:7777 (Host check + X-Torus header), jobs persisted and resumed, Needs-you paste/upload/skip, source mode urls|brave|both, Claude Sonnet/Opus via sentineld->llmd->httpx with retry/backoff and local extractive fallback, answers to vault/answers.
+- Removed the published Dilithium secret key from git tracking (.gitignore). The old key is still in GitHub history, so it was rotated.
+- Tested: 26/26 gateway API tests, UI flows, installer idempotency/rollback/keep (iteration report).
+
+## Backlog
+- P1: verify the real Claude model ids on the device (`torus llm models`); a citation graph (Phase 4 goal); coderd + oracled (Phase 7) as installers; follow-up questions in the same job.
+- P2: Phase 8 hardening, Phase 9 export (`torus export`), Mongo use by the daemons.
+
+### 2026-10-15 · Coder, follow-ups, citation map, PDF reports
+- Phase 7 coderd (projects root ~/projects; tree/read/write/rollback/run over NATS; path-safe; backups in ~/.torus/backups/coder/<task>; runs only user-typed commands, time-limited).
+- gateway_code.py: Claude proposes whole files (<<<FILE>>> blocks), diff review (apply/revise/reject), write, run, auto-fix loop up to N attempts, rollback. /api/code/* needs X-Torus-Token (~/.torus/etc/gateway.token, handed to Brave by `torus open`).
+- Follow-ups: job.followups[]; full conversation sent as messages (llmd + sentineld support messages).
+- Citation map (torus_cite.py): link extraction, page/site edges, ranking score, shared outside refs.
+- PDF reports (torus_report.py, stdlib-only PDF writer): vault/reports/<job>.pdf + download.
+- CLI: torus follow/report/code projects|new|run|tasks|root. Tests: iteration 6 22/22 + UI.

@@ -1,0 +1,4 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# TORUS boot (Termux:Boot). Keeps the CPU awake and starts runit (termux-services) after a reboot.
+termux-wake-lock
+. /data/data/com.termux/files/usr/etc/profile

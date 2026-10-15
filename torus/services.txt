@@ -1,0 +1,15 @@
+# TORUS runit services, written into $PREFIX/var/service/<name>/
+# columns: phase  name  run-template(under torus/files/service)  policy
+#   keep = your working run script stays (nats/mongo already work on your phone)
+1 nats-server  nats.run    keep
+2 torus-mongo  mongo.run   keep
+3 fetcherd     python.run  own
+3 parserd      python.run  own
+3 indexerd     python.run  own
+3 vaultd       python.run  own
+4 summarizerd  python.run  own
+5 airgapd      python.run  own
+5 sentineld    python.run  own
+5 llmd         python.run  own
+6 gatewayd     python.run  own
+7 coderd       python.run  own

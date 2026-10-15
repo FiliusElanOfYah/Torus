@@ -1,0 +1,8 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# TORUS service @NAME@ (only written if you have no nats-server service yet)
+export HOME=/data/data/com.termux/files/home
+export PREFIX=/data/data/com.termux/files/usr
+export PATH=/data/data/com.termux/files/usr/bin:/data/data/com.termux/files/home/.torus/bin
+export TMPDIR=/data/data/com.termux/files/usr/tmp
+exec 2>&1
+exec /data/data/com.termux/files/home/.torus/bin/nats-server -c /data/data/com.termux/files/home/.torus/etc/nats.conf

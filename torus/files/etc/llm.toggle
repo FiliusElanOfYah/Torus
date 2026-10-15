@@ -1,0 +1,3 @@
+enabled=false
+model=sonnet
+max_tokens=4096

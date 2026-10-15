@@ -1,0 +1,38 @@
+{
+  "summary": "TORUS gateway API + web UI + bash installer deeply tested. Backend: 26/26 pytest assertions pass (security headers, Host guard, validation, wiki->done/local, example.com fresh->needs_you, paste(>=50 chars)->done, short paste 400, skip_all, cancel, settings persistence to /tmp/torus-test/etc/{llm.toggle,search.conf}, llm_enabled-without-key still completes with local fallback, brave mode without key does not crash, /api/search, /api/jobs, /api/status, dossiers populated). Web UI at 127.0.0.1:7777 (390x844 viewport, vanilla JS hash routes): ask form submits -> navigates to #/job/<id>, status reaches 'done' with engine='local', job-answer rendered. Needs-you flow verified end-to-end: fresh https://example.com/ job -> needs_you card -> paste 989-char HTML -> status 'done' -> answer with answer-path '/tmp/torus-test/vault/answers/<id>-ui-needs-you-test-2.md'. All testIDs present (ask-*, job-*, jobs-list, vault-search-*, settings-*, needs-you-*). Installer in fake Termux: first `torus install 3` wrote 16 files; second run reported 'same' 16x and '0 files changed' (idempotent). `torus files` detects differs. `torus backups` + `torus rollback <stamp>` restores modified files. Keep policy on /tmp/fh/.torus/etc/search.conf verified: 'kept yours' without --force, replaced with backup under --force. `printf 'sk-ant-x' | torus key set brave` creates mode-600 file. Deduplication: `pages` SQLite table has 2 rows across many jobs targeting the same URLs, no duplicate URL rows. Settings reset to llm_enabled=false, search_mode=urls at end.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/settings", "issue": "Response exposes fictional default model IDs 'claude-opus-5-5' and 'claude-sonnet-5-5' (via opus_id/sonnet_id/model_id). These do not match any real Anthropic model id and will cause a 404 on the Anthropic API when a real key is configured. User can override via `torus llm id`, but defaults should be real IDs (e.g., claude-sonnet-4-5-20250929, claude-opus-4-5-20250929). Reference: /app/torus/files/bin/gatewayd.py (default llm settings)"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_torus_gateway.py",
+    "/app/test_reports/pytest/iter5_torus.xml"
+  ],
+  "action_items": [
+    "Consider shipping real Anthropic model IDs as defaults instead of 'claude-opus-5-5' / 'claude-sonnet-5-5'. Current defaults will 404 against real Anthropic API; fallback-to-local masks it but users turning the LLM on will always see the warning path.",
+    "No other action items. Every feature and bug under test passed. Keep policy, idempotency, rollback, and security headers are all correct."
+  ],
+  "critical_code_review_comments": [
+    "gatewayd.py uses a pure stdlib HTTP server to avoid uvicorn on Termux - good trade-off; Host-header check is strict and X-Torus guard works as DNS-rebinding defense.",
+    "Job IDs are 1-indexed via source['n'] (not array index). API consumers must read .n from the sources list; this is correct and self-documenting but worth noting in docs.",
+    "web/index.html renders job-answer only after the backend writes the dossier; the answer-path testID surfaces the vault path - good for CLI/UI parity.",
+    "Installer policy='keep' is correctly honored: files that already exist are preserved without --force and backed up before being replaced with --force.",
+    "SQLite `pages` table correctly deduplicates by URL (no duplicate rows across repeated jobs on the same URL)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_torus_gateway.py (new - canonical regression suite)"
+  ],
+  "success_rate": {"backend": "100% (26/26)", "frontend": "100% on all tested UI flows (nav, ask-submit, job-status, needs-you paste->done, vault search, settings persist)"},
+  "seed_data_creation": "Jobs created in /tmp/torus-test/var/jobs (TEST and ui-prefixed questions); dossiers in /tmp/torus-test/vault/answers; inbox pages in /tmp/torus-test/vault/inbox. Fake Termux install at HOME=/tmp/fh PREFIX=/tmp/fp (used /tmp/tv as venv). Backups stamped under /tmp/fh/.torus/backups/.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Mesh running under TORUS_HOME=/tmp/torus-test; restart with `cd /app/torus && TORUS_HOME=/tmp/torus-test tests/run_local_mesh.sh start`. Python at /tmp/tv/bin/python. Logs in /tmp/torus-test/logs/*.log. Gateway at http://127.0.0.1:7777 (requires X-Torus: 1 on POSTs, Host must be 127.0.0.1:7777 or localhost:7777). Source `n` is 1-indexed - use source['n'] from GET /api/jobs/{id} for paste/skip. Installer sandbox at HOME=/tmp/fh PREFIX=/tmp/fp PATH=/tmp/fk/bin:$PATH; venv symlinked at /tmp/fh/.torus/venv -> /tmp/tv. Backend regression suite at /app/backend/tests/test_torus_gateway.py."
+}

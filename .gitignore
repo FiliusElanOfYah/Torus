@@ -89,3 +89,7 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+
+# secret keys
+backend/.pq_keys/
+*.key
