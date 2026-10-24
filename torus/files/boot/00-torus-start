@@ -2,3 +2,6 @@
 # TORUS boot (Termux:Boot). Keeps the CPU awake and starts runit (termux-services) after a reboot.
 termux-wake-lock
 . /data/data/com.termux/files/usr/etc/profile
+# Phase 8 hardening: Claude off after a reboot (etc/hardening.conf), prune old rotated logs.
+T="$HOME/.torus"
+[ -x "$T/venv/bin/python" ] && [ -f "$T/bin/torus_audit.py" ] && "$T/venv/bin/python" "$T/bin/torus_audit.py" boot >/dev/null 2>&1

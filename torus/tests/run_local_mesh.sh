@@ -13,6 +13,7 @@ case "${1:-start}" in
     cp "$SRC"/bin/*.py "$T/bin/"; cp "$SRC/web/index.html" "$T/web/"
     [ -f "$T/etc/llm.toggle" ] || cp "$SRC/etc/llm.toggle" "$T/etc/"
     [ -f "$T/etc/search.conf" ] || cp "$SRC/etc/search.conf" "$T/etc/"
+    [ -f "$T/etc/hardening.conf" ] || cp "$SRC/etc/hardening.conf" "$T/etc/"
     [ -f "$T/etc/coder.conf" ] || printf 'root=%s/projects\nrun_timeout=60\n' "$T" > "$T/etc/coder.conf"
     pgrep -f "nats-server -a 127.0.0.1" >/dev/null || nohup nats-server -a 127.0.0.1 -p 4222 >"$T/logs/nats.log" 2>&1 </dev/null &
     sleep 1

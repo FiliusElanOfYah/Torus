@@ -10,7 +10,7 @@ LIB="$TORUS_SRC/torus/lib/common.sh"
 . "$LIB"
 CTL="$TORUS_HOME/bin/torusctl.py"
 ALL_SERVICES="nats-server torus-mongo fetcherd parserd indexerd vaultd summarizerd airgapd sentineld llmd gatewayd coderd"
-PHASES="0 1 2 3 4 5 6 7"
+PHASES="0 1 2 3 4 5 6 7 8 9"
 
 usage() {
 cat <<'EOF'
@@ -53,6 +53,13 @@ torus: your local research assistant
   torus llm model sonnet|opus      default model
   torus llm id sonnet|opus <id>    exact Anthropic model id
   torus search mode urls|brave|both  |  torus search count 1-10
+
+ HARDENING AND BACKUP (phases 8 and 9)
+  torus audit                OPSEC audit: 13 checks, each FAIL says how to fix it
+  torus seal                 sign keys + daemons (ML-DSA-65); airgapd refuses keys that no longer match
+  torus seal verify          check the seal and print the key fingerprint (compare with your paper copy)
+  torus export [--with-keys] [--no-vault]   signed tarball of your whole setup in Downloads
+  torus export list | torus export check <tarball> | torus restore <tarball>   (hash + signature checked, backs up first)
 EOF
 }
 
@@ -69,7 +76,7 @@ cmd_install() {
       --force) TORUS_FORCE=1 ;;
       all) list="$PHASES" ;;
       [0-9]) list="$list $a" ;;
-      *) die "unknown phase '$a' (use 0-6 or all)" ;;
+      *) die "unknown phase '$a' (use 0-9 or all)" ;;
     esac
   done
   [ -n "$list" ] || die "which phase? e.g. torus install all"
@@ -77,11 +84,37 @@ cmd_install() {
   for ph in $list; do
     f="$(ls "$TREE"/phases/"$ph"-*.sh 2>/dev/null | head -n 1)"
     [ -n "$f" ] || die "no script for phase $ph"
-    ( . "$LIB"; . "$f" ) || { rm -f "$TORUS_HOME/run/restart-all"; bad "stopped at phase $ph. Fix the FAIL lines above, then run: torus install $ph"; exit 1; }
+    ( . "$LIB"; . "$f" ) || { rm -f "$TORUS_HOME/run/restart-all"; reseal; bad "stopped at phase $ph. Fix the FAIL lines above, then run: torus install $ph"; exit 1; }
   done
   rm -f "$TORUS_HOME/run/restart-all"
+  reseal
   [ -d "$BACKUP_ROOT/$TORUS_STAMP" ] && info "replaced files were saved in ~/.torus/backups/$TORUS_STAMP (undo: torus rollback $TORUS_STAMP)"
   say "install finished. Next: torus doctor"
+}
+
+# The seal covers ~/.torus/bin/*.py and the key files, so anything that rewrites them re-seals.
+reseal() {
+  [ -f "$TORUS_HOME/airgap/MANIFEST.json" ] && [ -x "$VENV_PY" ] && [ -f "$TORUS_HOME/bin/torus_seal.py" ] || return 0
+  "$VENV_PY" "$TORUS_HOME/bin/torus_seal.py" seal --quiet && ok "seal updated (torus seal verify)" || warn "could not update the seal: torus seal"
+}
+
+cmd_seal() {
+  need_venv
+  [ -f "$TORUS_HOME/bin/torus_seal.py" ] || die "phase 8 is not installed: torus install 8"
+  [ $# -gt 0 ] || set -- seal
+  "$VENV_PY" "$TORUS_HOME/bin/torus_seal.py" "$@"
+}
+
+cmd_audit() {
+  need_venv
+  [ -f "$TORUS_HOME/bin/torus_audit.py" ] || die "phase 8 is not installed: torus install 8"
+  "$VENV_PY" "$TORUS_HOME/bin/torus_audit.py" "${1:-run}"
+}
+
+cmd_export() {
+  need_venv
+  [ -f "$TORUS_HOME/bin/torus_export.py" ] || die "phase 9 is not installed: torus install 9"
+  "$VENV_PY" "$TORUS_HOME/bin/torus_export.py" "$@"
 }
 
 _drift_file() {
@@ -150,6 +183,20 @@ cmd_doctor() {
   [ -f "$TORUS_HOME/etc/llm.toggle" ] && info "llm:    $(tr '\n' ' ' < "$TORUS_HOME/etc/llm.toggle")"
   [ -f "$TORUS_HOME/etc/search.conf" ] && info "search: $(tr '\n' ' ' < "$TORUS_HOME/etc/search.conf")"
 
+  say "Hardening (phase 8)"
+  if [ -f "$TORUS_HOME/bin/torus_seal.py" ] && [ -x "$VENV_PY" ]; then
+    if [ -f "$TORUS_HOME/airgap/MANIFEST.json" ]; then
+      "$VENV_PY" "$TORUS_HOME/bin/torus_seal.py" verify >/dev/null 2>&1 && ok "seal verifies (fingerprint $("$VENV_PY" "$TORUS_HOME/bin/torus_seal.py" fingerprint))" || bad "seal does not verify: torus seal verify"
+    else warn "not sealed yet: torus seal"; fi
+    if [ -f "$TORUS_HOME/var/audit.json" ]; then
+      "$VENV_PY" - "$TORUS_HOME/var/audit.json" <<'PY'
+import json, sys, time
+a = json.load(open(sys.argv[1])); c = a["counts"]
+print(f"  ..    last audit {a['when']}: {c['pass']} pass, {c['fail']} fail, {c['warn']} warn   (torus audit)")
+PY
+    else info "no audit yet: torus audit"; fi
+  else warn "phase 8 not installed: torus install 8"; fi
+
   echo
   if [ "$FAILS" -eq 0 ]; then say "doctor: no failures"; else say "doctor: $FAILS failure(s). Most are fixed by: torus install all"; fi
 }
@@ -167,9 +214,11 @@ cmd_key() {
       [ "$name" = anthropic ] && case "$k" in sk-ant-*) ;; *) warn "Anthropic keys normally start with sk-ant-" ;; esac
       ( umask 077; printf '%s\n' "$k" > "$TORUS_HOME/airgap/$name.key" )
       chmod 600 "$TORUS_HOME/airgap/$name.key"; unset k
-      ok "$name key stored in ~/.torus/airgap/$name.key (mode 600, only airgapd reads it)" ;;
+      ok "$name key stored in ~/.torus/airgap/$name.key (mode 600, only airgapd reads it)"
+      reseal ;;
     rm)
-      rm -f "$TORUS_HOME/airgap/$name.key" && ok "$name key removed" ;;
+      rm -f "$TORUS_HOME/airgap/$name.key" && ok "$name key removed"
+      reseal ;;
     status)
       for k in anthropic brave; do
         f="$TORUS_HOME/airgap/$k.key"
@@ -266,5 +315,9 @@ case "$cmd" in
   key) cmd_key "$@" ;;
   llm) cmd_llm "$@" ;;
   search) cmd_search "$@" ;;
+  audit) cmd_audit "$@" ;;
+  seal) cmd_seal "$@" ;;
+  export) case "${1:-}" in list|check) cmd_export "$@" ;; *) cmd_export export "$@" ;; esac ;;
+  restore) [ -n "${1:-}" ] || die "usage: torus restore <tarball> [--yes]"; cmd_export restore "$@" ;;
   *) echo "unknown command: $cmd"; usage; exit 1 ;;
 esac

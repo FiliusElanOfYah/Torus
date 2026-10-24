@@ -1,0 +1,48 @@
+{
+  "summary": "Phase 8 (seal/audit/boot) and Phase 9 (export/restore) tested against the local mesh at TORUS_HOME=/tmp/torus-test, with the gateway on 127.0.0.1:7777. CLI: seal/verify/fingerprint/sign/verify-file all work. Changing the key file, the manifest or a daemon makes verify exit 1, and airgapd answers 'ERR sealed: ...'. Running seal again serves the key again. Audit run/json/boot/prune behave as specified: 13 items, exit 1 only because opsec-2 FAILs, which is expected in this container. Gateway: GET/POST /api/audit work. POST /api/export returns 401 with no token or a wrong token. With the token it returns 200 with path/bytes/sha256/sig, and with_keys adds the .key files. Tarball contents and the fake-HOME restore were checked: restore makes backups, refuses a bad sha256, refuses paths outside ~/.torus and ~/.termux, and stops if not confirmed. Web UI at 390x844: the audit card, its expandable items and the re-run button work. Export shows the locked message without a token. With the token, Export creates a file and lists it, including with keys. The Ask/Jobs/Vault/Code tabs render. Regression: new_features 21/22 (the known async failure) and phase8_9 16/16. New suite test_torus_iter7_export_audit.py passes 15/15. Bugs found: 1 HIGH (restore leaves a mismatched ML-DSA keypair), 3 MEDIUM (gateway.token in the default export, airgapd serves keys when the manifest is deleted, concurrent exports race), plus several minor ones.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "torus_export.py restore (torus restore)", "issue": "Restoring a no-keys export onto a phone that is already sealed leaves a mismatched keypair. RESTORE.md step 4 runs the bootstrap/install, and phase 8 runs `seal`, so the new phone already has its own keys. The restore then overwrites airgap/mldsa65.pk (and MANIFEST.json/.sig) with the old phone's copies but keeps the new phone's mldsa65.sk. keygen() sees both files and does not make a new pair, so every later `torus seal` signs with an sk that does not match the pk. `torus seal verify` then always says 'signature does NOT verify', and airgapd refuses every key, so Claude stops working after following RESTORE.md. Reproduced with fake HOME /tmp/fh2: seal, restore, seal, verify gives FAIL, and the fingerprint switched to the old phone's.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "torus_export.py export / POST /api/export", "issue": "MEDIUM: the default export (without --with-keys) contains .torus/etc/gateway.token. That is the secret that unlocks /api/code (write files, run commands), and the tarball sits in shared Downloads where any app with storage permission can read it. It should be left out unless --with-keys; gatewayd makes a new one on start."},
+      {"endpoint": "airgapd KeyGuard (torus_seal.py:186-206)", "issue": "MEDIUM, fails open: deleting airgap/MANIFEST.json and MANIFEST.sig puts KeyGuard into 'unsealed' mode, and airgapd then serves a tampered key ('sk-ant-EVIL' was served). Suggest refusing keys when mldsa65.pk/sk or seal.hmac exist but the manifest is missing."},
+      {"endpoint": "POST /api/export (gatewayd.py:498)", "issue": "MEDIUM: two exports at the same time race. One request returned 500 'export failed: [Errno 2] No such file ... docs/RESTORE.md.tmp' because atomic_write uses a fixed tmp name. Two exports in the same second also get the same name torus-YYYYmmdd-HHMMSS and overwrite each other. Add an asyncio.Lock around the export and make the file name unique."},
+      {"endpoint": "/app/torus/bin/torus wrapper", "issue": "cmd_seal only passes $1, so `torus seal sign <file>` and `torus seal verify-file <file>` fail with the usage message. `torus export check <file>` runs a new export instead of the check, because the wrapper always adds 'export'."},
+      {"endpoint": "gatewayd X-Torus header", "issue": "Info: X-Torus is only required on POST. GET /api/audit and /api/export answer 200 without it. This is by design (Host check plus no CORS); the review note saying 'every /api request needs it' is slightly off."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Backup card", "issue": "Pressing Export without a token replaces the whole backups list (export-row items) with the locked message, so existing backups disappear until the page is reloaded. The message should go next to the list instead.", "testID": "export-locked", "priority": "low"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Settings > Backup", "issues": ["The export-with-keys checkbox is 13x13 px. The label wraps it so the text is tappable, but the box itself is below 44px.", "There is no confirmation when exporting with API keys to shared Downloads, and the list does not show which backups contain keys."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_torus_iter7_export_audit.py", "/app/backend/tests/manual_seal_flow.sh", "/app/backend/tests/manual_audit_flow.sh", "/app/test_reports/pytest/pytest_iter7.xml", "/app/test_reports/pytest/pytest_iter7_extra.xml"],
+  "action_items": [
+    "HIGH: Fix the restore keypair mismatch. In restore(), do not extract .torus/airgap/mldsa65.pk or MANIFEST.json/.sig unless .torus/airgap/mldsa65.sk is also in the archive (the archive pk can still be used for check_tarball). In addition, keygen() should test the pk/sk pair with a sign+verify round trip and make a new pair if they do not match. Add a test: seal a fresh fake home, restore a no-keys export, seal, then verify must exit 0.",
+    "MEDIUM: Leave etc/gateway.token out of exports unless --with-keys (add it to the _filter rule for airgap secrets).",
+    "MEDIUM: Make KeyGuard refuse keys when a signing key exists but the manifest/sig is missing (reply 'ERR sealed: seal missing').",
+    "MEDIUM: Put an asyncio.Lock around the export in api_export, and give each export a unique name (add a counter or check the name is free); atomic_write should use a unique tmp name.",
+    "LOW: Make the torus wrapper pass all arguments to cmd_seal (\"$@\"), and add an `export check` route.",
+    "LOW: Keep the export list visible when the locked message is shown; consider asking for confirmation when include-API-keys is checked.",
+    "LOW: test_torus_phase8_9 export/restore tests leave .sha256/.sig files behind in /tmp/torus-test/exports after deleting the tarballs."
+  ],
+  "critical_code_review_comments": [
+    "torus_seal: KeyGuard caches on MANIFEST (mtime_ns, size) only. Replacing MANIFEST.sig alone is not noticed until the manifest changes. Low risk because the old signature is still checked, but including the sig's stat in the stamp is cheap.",
+    "The seal is tamper-evident but not tamper-proof: mldsa65.sk is on the same device and owned by the same user, so anyone who can write a key can also re-seal. This is worth saying plainly in the docs, alongside the paper fingerprint.",
+    "torus_export.export writes the tarball into dest_dir/.tmp. If --to points inside an included folder (for example ~/.torus/var), the tarball can include itself; the .tmp filter only partly prevents this.",
+    "check_tarball and export read the whole tarball into memory to hash it. Fine for exports under 100 MB; hashing in chunks would be safer for phones with large vaults."
+  ],
+  "updated_files": ["/app/backend/tests/test_torus_phase8_9.py (boot test now restores llm.toggle in finally)", "/app/backend/tests/test_torus_iter7_export_audit.py (new)", "/app/backend/tests/manual_seal_flow.sh (new)", "/app/backend/tests/manual_audit_flow.sh (new)"],
+  "success_rate": {"backend": "92% (all specified behaviour passes; 1 HIGH + 3 MEDIUM bugs in edge/security paths)", "frontend": "95% (all specified flows pass; 1 low UI issue)"},
+  "seed_data_creation": "None kept. Exports created during testing were deleted, including the with-keys tarballs. Only the earlier torus-20261024-074945 export remains. anthropic.key was restored to 'sk-ant-test-1234567890abcdef' and re-sealed (verify OK, fingerprint be1065ad66bc9e7e). llm.toggle is enabled=true. Browser localStorage torus_token was set in the Playwright session only.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Mesh runs locally: TORUS_HOME=/tmp/torus-test, venv /tmp/tv/bin/python, gateway 127.0.0.1:7777, token at /tmp/torus-test/etc/gateway.token, airgap socket /tmp/torus-test/airgap/airgap.sock (send 'anthropic\\n'). Run the pytest suites with -p no:cacheprovider -c /dev/null. With no TORUS_EXPORT_DIR and no ~/storage/downloads, the gateway writes exports to /tmp/torus-test/exports. After running test_torus_phase8_9, check that llm.toggle still says enabled=true (now fixed in the test). To reproduce the HIGH restore bug: make a fake HOME, copy bin, seal, restore a no-keys tarball, seal again; verify FAILs.",
+  "rca_of_issue": "Restore keypair mismatch: _filter() deliberately exports airgap/mldsa65.pk plus MANIFEST.* without mldsa65.sk, and restore() extracts everything. On the new phone, torus_seal.keygen() only creates a pair when one file is missing, so the restored old pk sits next to the new sk and every signature fails to verify. Fix: skip the pk/MANIFEST on restore when the sk is not in the archive, and/or check the pair in keygen()."
+}

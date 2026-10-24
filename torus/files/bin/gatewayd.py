@@ -485,6 +485,32 @@ async def api_settings(body):
     return 200, settings_payload()
 
 
+async def api_audit(method):
+    try:
+        import torus_audit
+    except ImportError:
+        return err(503, "phase 8 is not installed: torus install 8")
+    if method == "POST":
+        return 200, await asyncio.to_thread(torus_audit.run_audit)
+    return 200, torus_audit.last_audit() or {"ok": None, "counts": {}, "items": [], "when": ""}
+
+
+async def api_export(method, body, headers):
+    try:
+        import torus_export
+    except ImportError:
+        return err(503, "phase 9 is not installed: torus install 9")
+    if method == "GET":
+        return 200, {"exports": torus_export.list_exports()}
+    if not secrets.compare_digest((headers or {}).get("x-torus-token", ""), STATE["token"]):
+        return err(401, "Export needs your TORUS token. Open the page from Termux with: torus open")
+    try:
+        info = await asyncio.to_thread(torus_export.export, bool(body.get("with_keys")), not body.get("no_vault"))
+    except OSError as e:
+        return err(500, f"export failed: {e}")
+    return 200, info
+
+
 async def route(method, path, query, body, headers=None):
     if method == "GET" and path in ("/", "/index.html"):
         page = WEB.read_bytes() if WEB.exists() else b"<h1>TORUS</h1><p>web/index.html missing: torus install 6</p>"
@@ -496,6 +522,10 @@ async def route(method, path, query, body, headers=None):
     if path == "/api/health":
         nc = STATE["nc"]
         return 200, {"ok": True, "nats": bool(nc and nc.is_connected), "jobs": len(jobs), "running": len(tasks)}
+    if path == "/api/audit":
+        return await api_audit(method)
+    if path == "/api/export":
+        return await api_export(method, body, headers)
     if method == "GET" and path == "/api/status":
         return 200, {"services": await sv_status(), "settings": settings_payload()}
     if path == "/api/settings":

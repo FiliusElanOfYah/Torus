@@ -358,7 +358,29 @@ async function viewSettings() {
     <p class="hint" data-testid="settings-brave-key">Brave Search key: <b class="${s.keys.brave?"s-ok":"s-error"}">${s.keys.brave?"stored":"not set"}</b>. Set one with <code class="k">torus key set brave</code></p></div>
   <div class="card" data-testid="settings-services"><label style="margin-top:0">Services</label>
     ${st.services.map(x=>`<div class="svc" data-testid="service-${x.name}"><span>${x.name}</span><span class="${x.state==="run"?"s-ok":"s-error"}">${esc(x.state)}</span></div>`).join("")}
-    <p class="hint">Fix anything red with <code class="k">torus doctor</code> in Termux.</p></div>`;
+    <p class="hint">Fix anything red with <code class="k">torus doctor</code> in Termux.</p></div>
+  <div class="card" data-testid="settings-audit"><label style="margin-top:0">Security audit (phase 8)</label>
+    <div id="audit-body"><p class="hint">loading…</p></div>
+    <button id="audit-run" data-testid="audit-run">Run audit now</button></div>
+  <div class="card" data-testid="settings-export"><label style="margin-top:0">Backup (phase 9)</label>
+    <div id="export-body"><p class="hint">loading…</p></div>
+    <div class="row"><button id="export-run" data-testid="export-run">Export setup</button>
+      <label class="hint" style="margin:0;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="export-keys" data-testid="export-with-keys" style="width:22px;height:22px;accent-color:var(--amber)"> include API keys</label></div>
+    <p class="hint">Writes a signed <code class="k">torus-&lt;date&gt;.tar.gz</code> to Downloads. Restore on another phone with <code class="k">torus restore &lt;file&gt;</code>.</p></div>`;
+  renderAudit(); renderExports();
+  $("#audit-run").onclick = async () => { $("#audit-run").disabled = true; try { await renderAudit(true); toast("Audit done"); } catch (err) { toast(err.message); } $("#audit-run").disabled = false; };
+  $("#export-run").onclick = async () => {
+    const withKeys = $("#export-keys").checked;
+    if (withKeys && !confirm("Include your API keys, seal secret and gateway token in the backup? Anyone who gets the file in Downloads can use them.")) return;
+    $("#export-run").disabled = true;
+    try { const r = await api("/api/export", {with_keys: withKeys}); toast(`Saved ${(r.bytes/1e6).toFixed(1)} MB`); await renderExports(); }
+    catch (err) {
+      const msg = /token/i.test(err.message) ? `<p class="warn" data-testid="export-locked">Export is locked. In Termux run <code class="k">torus open</code> once, or just type <code class="k">torus export</code>.</p>` : `<p class="warn">${esc(err.message)}</p>`;
+      const old = $("#export-body").querySelector(".warn"); if (old) old.remove();
+      $("#export-body").insertAdjacentHTML("afterbegin", msg);
+    }
+    $("#export-run").disabled = false;
+  };
   $("#view").onclick = async e => {
     const b = e.target.closest("button"); if (!b) return; let body = null;
     if (b.dataset.llm) body = {llm_enabled: b.dataset.llm === "1"};
@@ -367,6 +389,27 @@ async function viewSettings() {
     if (!body) return;
     try { settings = await api("/api/settings", body); toast("Saved"); viewSettings(); } catch (err) { toast(err.message); }
   };
+}
+
+const auditIcon = {pass: "✓", fail: "✗", warn: "!", skip: "–"}, auditCls = {pass: "s-ok", fail: "s-error", warn: "s-needs_you", skip: "hint"};
+async function renderAudit(run) {
+  const el = $("#audit-body"); if (!el) return;
+  let a;
+  try { a = run ? await api("/api/audit", {}) : await api("/api/audit"); }
+  catch (err) { el.innerHTML = `<p class="hint" data-testid="audit-missing">${esc(err.message)}</p>`; return; }
+  if (!a.items.length) { el.innerHTML = `<p class="hint" data-testid="audit-empty">No audit yet. Tap the button, or run <code class="k">torus audit</code>.</p>`; return; }
+  const c = a.counts;
+  el.innerHTML = `<p class="hint" data-testid="audit-summary"><b class="${c.fail?"s-error":"s-ok"}">${c.fail ? c.fail + " failing" : "no failures"}</b> · ${c.pass} pass · ${c.warn} warn · ${c.skip} skipped · ${esc(a.when)}</p>` +
+    a.items.map(i => `<details class="svc" style="display:block" data-testid="audit-item-${i.id}"><summary style="display:flex;justify-content:space-between;cursor:pointer;list-style:none"><span>${esc(i.label)}</span><span class="${auditCls[i.status]}" style="white-space:nowrap;margin-left:12px">${auditIcon[i.status]} ${i.status}</span></summary>
+      <p class="hint" style="margin:6px 0 0">${esc(i.detail)}${i.fix && i.status !== "pass" ? `<br>fix: <code class="k">${esc(i.fix)}</code>` : ""}</p></details>`).join("");
+}
+async function renderExports() {
+  const el = $("#export-body"); if (!el) return;
+  try {
+    const r = await api("/api/export");
+    el.innerHTML = r.exports.length ? r.exports.slice(0, 5).map(x => `<div class="svc" data-testid="export-row"><span>${esc(x.name)}</span><span>${(x.bytes/1e6).toFixed(1)} MB${x.signed ? " · signed" : ""}</span></div>`).join("")
+      : `<p class="hint" data-testid="export-empty">No backups yet.</p>`;
+  } catch (err) { el.innerHTML = `<p class="hint" data-testid="export-missing">${esc(err.message)}</p>`; }
 }
 
 async function route() {

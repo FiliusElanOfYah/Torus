@@ -9,11 +9,11 @@ with a web page at `http://127.0.0.1:7777` that you open in Brave.
 ```
 torus/
   bootstrap.sh     one-line installer (clones this repo to ~/.torus/src)
-  bin/torus        the CLI: doctor, install, update, rollback, ask, keys, switches
+  bin/torus        the CLI: doctor, install, update, rollback, ask, keys, audit, seal, export
   lib/common.sh    safe writer: whole files, backup first, CRLF stripped, idempotent
   manifest.txt     every file TORUS installs, its phase, and whether it's "own" or "keep"
   services.txt     every runit service and its run template
-  phases/          0-base ... 6-gateway (each safe to re-run)
+  phases/          0-base ... 9-export (each safe to re-run)
   files/           the canonical sources: daemons, web page, run scripts, configs
   tests/           run_local_mesh.sh: run the mesh on a normal Linux box
 ```

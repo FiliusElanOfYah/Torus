@@ -101,3 +101,9 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+# 2026-10-24 main agent: Phase 8 (hardening) + Phase 9 (export/restore) in torus/.
+# Local mesh: torus/tests/run_local_mesh.sh start (TORUS_HOME=/tmp/torus-test, venv /tmp/tv, nats-server in /usr/local/bin).
+# fake Claude: /tmp/tv/bin/python torus/tests/fake_llm.py (replaces llmd).
+# Own tests: /tmp/tv/bin/python -m pytest -p no:cacheprovider -c /dev/null backend/tests/test_torus_phase8_9.py  -> 16/16.
+# Gateway: http://127.0.0.1:7777 (needs X-Torus: 1 header; /api/export POST + /api/code need X-Torus-Token from /tmp/torus-test/etc/gateway.token).
+# Settings tab shows Security audit + Backup cards (data-testid settings-audit, audit-run, audit-item-<id>, settings-export, export-run, export-with-keys).

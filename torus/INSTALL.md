@@ -34,7 +34,7 @@ ports, keys and switches. Each FAIL line tells you the exact command that fixes 
 ```
 torus install all
 ```
-Phases 0 to 7 run in order and stop at the first real problem.
+Phases 0 to 9 run in order and stop at the first real problem.
 - Your working `nats-server` and `torus-mongo` run scripts, `nats.conf`,
   `llm.toggle` and `search.conf` are marked **yours** and are left alone.
 - The Python daemons are replaced by the fixed versions: indexerd removes
@@ -132,6 +132,41 @@ private token, so no other app on the phone can make TORUS write files or run co
 Claude can only propose file contents. Commands are only ever the ones you typed.
 Without AI: `torus code run <project> "<command>"`, or **Quick run** on the page.
 
+## Step 10: Hardening (seal + audit)
+
+```
+torus install 8
+```
+- **Seal**: signs every API key file, the gateway token and every daemon with ML-DSA-65 (the
+  post-quantum signature standard, FIPS 204). airgapd refuses to hand out a key
+  whose file no longer matches the seal. `torus seal verify` prints the key
+  fingerprint; write it on paper and compare now and then. `torus install` and
+  `torus key set` re-seal by themselves.
+- **Audit**: `torus audit` runs 13 checks (F-Droid build, no port on 0.0.0.0,
+  key file modes, no key in logs, seal, log rotation, storage scope, Termux:Boot,
+  package list, Claude off at boot, gateway token, Host-header guard, CRLF).
+  Every FAIL names the fix. The same list is on the web page under **Settings**.
+- **At boot**: Claude is switched off and rotated logs older than 7 days are
+  deleted. Both switches live in `~/.torus/etc/hardening.conf`.
+
+## Step 11: Backup and restore
+
+```
+torus install 9
+torus export
+```
+`torus export` writes `~/storage/downloads/torus-<date>.tar.gz` plus `.sha256`
+and `.sig`: your config, web page, daemons, vault, index, boot script, the pinned
+package list (`etc/pkg.manifest`) and Python pins (`etc/requirements.freeze`).
+API keys, the seal secret and the gateway token stay out unless you add `--with-keys`; `--no-vault` makes it small.
+`torus export list` shows what you have. The **Settings** page has the same button.
+
+On a new phone: install Termux + Termux:Boot from F-Droid, run the bootstrap line
+from Step 2, then `torus restore ~/storage/downloads/torus-<date>.tar.gz`
+(hash and signature are checked, overwritten files are backed up), then
+`torus install all`, `torus seal`, `torus audit`. The full list is in
+`~/.torus/docs/RESTORE.md` and inside every export.
+
 ---
 
 ## Every day
@@ -143,6 +178,8 @@ Without AI: `torus code run <project> "<command>"`, or **Quick run** on the page
 | read a service log | `torus logs gatewayd` (`-f` to follow) |
 | undo the last install | `torus backups`, then `torus rollback <stamp>` |
 | check after a reboot | `torus doctor` |
+| security check | `torus audit` |
+| back everything up | `torus export` |
 
 ## Changing code yourself (Acode)
 
@@ -162,3 +199,5 @@ from editors are stripped automatically. `torus files` shows what differs.
 | 5 | keys, redaction, Claude | airgapd, sentineld, llmd |
 | 6 | web page, `torus ask`, follow-ups, citation map, PDF reports | gatewayd |
 | 7 | coder: write, run and fix code in your projects | coderd |
+| 8 | hardening: ML-DSA-65 seal, `torus audit`, Claude off at boot, log pruning | none |
+| 9 | backup: `torus export` / `torus restore` (signed tarball) | none |

@@ -102,3 +102,13 @@ scripts, service unit files, and bootstrap artifacts for every phase (0 → 9).
 - Citation map (torus_cite.py): link extraction, page/site edges, ranking score, shared outside refs.
 - PDF reports (torus_report.py, stdlib-only PDF writer): vault/reports/<job>.pdf + download.
 - CLI: torus follow/report/code projects|new|run|tasks|root. Tests: iteration 6 22/22 + UI.
+
+### 2026-10-24 · Phase 8 hardening + Phase 9 export/restore (torus/ tree)
+- Phase 8 (`torus install 8`): torus_seal.py signs an airgap manifest (sha3-256 of airgap/*.key, etc/gateway.token, bin/*.py) with ML-DSA-65 via pure-Python `dilithium-py` (HMAC-SHA256 fallback). Keypair airgap/mldsa65.{pk,sk}; `torus seal`, `torus seal verify|fingerprint`. airgapd checks the seal per request and refuses tampered keys/manifest (`ERR sealed: ...`). `torus install` and `torus key set|rm` re-seal.
+- torus_audit.py: 13 checks (opsec-1..10 + gateway token, Host guard, CRLF) -> var/audit.json + logs/audit.jsonl; `torus audit`; gatewayd GET/POST /api/audit; Settings card on the web page. `torus_audit.py boot` runs from Termux:Boot: Claude off at reboot + prune rotated logs older than 7 days (etc/hardening.conf, keep).
+- Phase 9 (`torus install 9`): torus_export.py writes etc/requirements.freeze, etc/pkg.manifest, docs/RESTORE.md and a signed tarball (Downloads/torus-<date>.tar.gz + .sha256 + .sig); keys excluded unless --with-keys; --no-vault. `torus export [list]`, `torus restore <file>` (hash+sig check, backups to ~/.torus/backups/restore-<time>). gatewayd GET /api/export (list), POST /api/export (token). Settings card with Export button.
+- Tests: backend/tests/test_torus_phase8_9.py 16/16 + testing-agent suite test_torus_iter7_export_audit.py 15/15 (iteration 7). Fixed after review: restore skips pk+manifest when no seal secret is inside, keygen regenerates a mismatched pair, gateway.token excluded from default export, airgapd fails closed when the manifest is missing, export lock + unique names, `torus seal <sub> <file>` and `torus export check`. Catalog in backend/phases.py (manual Phase 8/9 steps) left as is.
+
+## Backlog (after 2026-10-24)
+- P1: verify real Claude model ids on the device (`torus llm models`).
+- P2: oracled (hourly refill of pinned topics), Mongo use by the daemons, multi-device session roster, dossier preview tab, amber-high-contrast theme, replace HMAC manifest in the web app with the ML-DSA seal, update backend/phases.py Phase 8/9 catalog to point at `torus install 8/9`.
