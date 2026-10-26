@@ -18,6 +18,7 @@ nav a{flex-shrink:0;padding:10px 14px;font:600 13px var(--mono);color:var(--dim)
 nav a.on{color:var(--amber);border-color:var(--amber)}
 nav a{position:relative}.badge{display:none;position:absolute;top:4px;right:2px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--amber);color:#111;font:700 10px/16px var(--mono);text-align:center;letter-spacing:0}.badge.on{display:inline-block}
 .pill.new{color:#111;background:var(--amber);border-color:var(--amber);font-size:11px;padding:1px 8px}
+.xbtn{min-width:36px;min-height:36px;padding:0;margin:-6px -4px -6px 0;border:1px solid transparent;background:transparent;color:var(--dim);font:18px/1 var(--mono);border-radius:6px}.xbtn:hover,.xbtn:focus{color:var(--red);border-color:var(--line)}
 .doc{display:block;padding:10px 0;border-bottom:1px solid var(--line);color:var(--text);text-decoration:none}.doc small{display:block;color:var(--dim);font:12px var(--mono);margin-top:2px}
 .answer .hit{background:#2a2410;border-radius:4px;outline:2px solid var(--amber);outline-offset:4px}
 .dl{font-size:13px;margin:4px 0 0;padding-left:0;list-style:none}.dl li{padding:3px 0;border-bottom:1px dashed var(--line)}.dl .add{color:var(--green)}.dl .rm{color:var(--red)}
@@ -403,7 +404,22 @@ async function viewVault() {
     try { await api("/api/oracle/config", {yaml: text}); toast("Topics saved"); $("#oracle-cancel").onclick(); await renderOracle(); }
     catch (err) { toast(err.message); }
   };
-  $("#oracle-body").onclick = e => {
+  $("#oracle-body").onclick = async e => {
+    const x = e.target.closest("button[data-unpin]");
+    if (x) {
+      x.disabled = true;
+      try { const r = await api("/api/oracle/unpin", {url: x.dataset.unpin, topic: x.dataset.topic}); toast(r.seeds.length ? `Unpinned from ${r.topic}` : `${r.topic} has no seeds left`); pinnedTopics = null; await renderOracle(); }
+      catch (err) { toast(err.message); x.disabled = false; }
+      return;
+    }
+    const xt = e.target.closest("button[data-unpin-topic]");
+    if (xt) {
+      if (!confirm(`Unpin the whole topic “${xt.dataset.unpinTopic}”? Its digests stay in vault/topics; only the schedule stops.`)) return;
+      xt.disabled = true;
+      try { await api("/api/oracle/unpin", {topic: xt.dataset.unpinTopic}); toast(`Unpinned ${xt.dataset.unpinTopic}`); pinnedTopics = null; await renderOracle(); }
+      catch (err) { toast(err.message); xt.disabled = false; }
+      return;
+    }
     const b = e.target.closest("button[data-topic]"); if (!b) return;
     startRefill({topic: b.dataset.topic}, `Refilling ${b.dataset.topic}`, b);
   };
@@ -463,9 +479,9 @@ async function renderOracle() {
   el.innerHTML = `<p class="hint" data-testid="oracle-summary">${o.daemon === "down" ? `<b class="s-error">oracled is down</b> · ` : ""}${o.running ? `<b class="s-ok">refilling…</b> ${esc(o.current)} · ` : ""}${esc(sched)}${o.last_run ? ` · last run ${esc(when(o.last_run))}` : ""}${o.error ? `<br><span class="s-error">${esc(o.error)}</span>` : ""}</p>` +
     (o.topics.length ? o.topics.map(t => `<details class="svc" style="display:block" data-topic="${esc(t.name)}" data-testid="oracle-topic-${esc(t.name)}" ${open.has(t.name) ? "open" : ""}><summary style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;list-style:none;gap:8px;min-height:44px"><span><b>${esc(t.name)}</b> <span class="hint">${t.seeds.length} seed${t.seeds.length===1?"":"s"}</span>${t.changed && t.changed_at > (oracleSeen[t.name] || 0) ? ` <span class="pill new" data-testid="oracle-new-${esc(t.name)}">${t.changed} new</span>` : ""}</span><span style="white-space:nowrap">${t.when ? `<span class="${t.fail?"s-needs_you":"s-ok"}">${t.ok}/${t.seeds.length} ok</span> · ${esc(new Date(t.when*1000).toLocaleString())}` : '<span class="hint">not refilled yet</span>'}</span></summary>
       ${t.seeds.map(u => { const r = (t.results || []).find(x => x.url === u) || {}; const d = r.diff || {}; const hasDiff = !d.first && ((d.added || []).length || (d.removed || []).length);
-        return `<div class="hint" style="margin:4px 0 0;display:flex;gap:8px;justify-content:space-between;align-items:center;min-height:32px"><a href="${esc(u)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.title || u)}</a><span class="${oracleCls[r.status] || "hint"}" style="white-space:nowrap">${r.changed ? `<span class="s-needs_you">${d.first ? "first read" : "changed"} · </span>` : ""}${r.status ? esc(r.status) + (r.error ? ": " + esc(r.error) : "") : "–"}</span></div>` +
+        return `<div class="hint" style="margin:4px 0 0;display:flex;gap:8px;justify-content:space-between;align-items:center;min-height:32px"><a href="${esc(u)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.title || u)}</a><span class="${oracleCls[r.status] || "hint"}" style="white-space:nowrap">${r.changed ? `<span class="s-needs_you">${d.first ? "first read" : "changed"} · </span>` : ""}${r.status ? esc(r.status) + (r.error ? ": " + esc(r.error) : "") : "–"}</span><button class="xbtn" data-unpin="${esc(u)}" data-topic="${esc(t.name)}" data-testid="oracle-unpin-seed" title="Unpin this page" aria-label="Unpin this page">×</button></div>` +
         (hasDiff ? `<details data-testid="oracle-diff"><summary class="hint" style="cursor:pointer;min-height:36px;display:flex;align-items:center">${r.changed ? "What changed" : "Last change " + esc(r.diff_when ? new Date(r.diff_when * 1000).toLocaleDateString() : "")}: <span class="s-ok">&nbsp;+${d.n_added}</span>&nbsp;/&nbsp;<span class="s-error">−${d.n_removed}</span>&nbsp;sentences</summary><ul class="dl">${(d.added || []).map(x => `<li class="add">+ ${esc(x)}</li>`).join("")}${(d.removed || []).map(x => `<li class="rm">− ${esc(x)}</li>`).join("")}</ul></details>` : ""); }).join("")}
-      <div class="row" style="margin-top:8px"><button data-topic="${esc(t.name)}" data-testid="oracle-run-topic" ${o.running?"disabled":""}>Refill this topic</button>${t.digest ? `<a class="btnlink" href="#/doc/${encodeURIComponent("topics/" + t.digest.split("/").pop())}" data-testid="oracle-digest-link">Read digest</a>` : ""}${t.rollup ? `<a class="btnlink" href="#/doc/${encodeURIComponent("topics/" + t.rollup.split("/").pop())}" data-testid="oracle-rollup-link">This week</a>` : ""}</div></details>`).join("")
+      <div class="row" style="margin-top:8px"><button data-topic="${esc(t.name)}" data-testid="oracle-run-topic" ${o.running?"disabled":""}>Refill this topic</button><button class="danger" data-unpin-topic="${esc(t.name)}" data-testid="oracle-unpin-topic">Unpin topic</button>${t.digest ? `<a class="btnlink" href="#/doc/${encodeURIComponent("topics/" + t.digest.split("/").pop())}" data-testid="oracle-digest-link">Read digest</a>` : ""}${t.rollup ? `<a class="btnlink" href="#/doc/${encodeURIComponent("topics/" + t.rollup.split("/").pop())}" data-testid="oracle-rollup-link">This week</a>` : ""}</div></details>`).join("")
     : `<p class="hint" data-testid="oracle-empty">No pinned topics yet. Tap “Edit topics”.</p>`);
   const runBtn = $("#oracle-run"); if (runBtn) runBtn.disabled = !!o.running;
   el.querySelectorAll("details[data-topic]").forEach(d => d.addEventListener("toggle", () => { if (!d.open) return;

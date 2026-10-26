@@ -760,6 +760,25 @@ async def api_oracle(method, path, body):
                 refilling = False
         return 200, {"ok": True, "topic": topic["name"], "seeds": topic["seeds"], "created": created, "already": already,
                      "refilling": refilling}
+    if path == "/api/oracle/unpin":
+        url = (body.get("url") or "").strip()
+        name = (body.get("topic") or "").strip()
+        topics, perr = oracled.load_pinned()
+        if perr:
+            return err(409, perr + " - fix the file first (Vault tab, Edit topics)")
+        topic = next((t for t in topics if t["name"].lower() == name.lower()), None)
+        if not topic:
+            return err(404, f"no pinned topic called '{name}'")
+        removed_topic = False
+        if url:
+            if url not in topic["seeds"]:
+                return err(404, "that page is not a seed of this topic")
+            topic["seeds"].remove(url)
+        else:  # no url = remove the whole topic
+            topics.remove(topic)
+            removed_topic = True
+        await asyncio.to_thread(oracled.atomic_write, oracled.PINNED, oracled.dump_pinned(topics))
+        return 200, {"ok": True, "topic": topic["name"], "seeds": topic["seeds"], "removed_topic": removed_topic}
     if path == "/api/oracle/config":
         if method == "POST":
             try:

@@ -171,3 +171,23 @@ def test_pin_source_creates_topic_and_dedupes(s):
         wait_idle(s)
     finally:
         pinned.write_text(old)
+
+
+def test_unpin_seed_and_topic(s):
+    pinned = HOME / "etc" / "pinned.yaml"
+    old = pinned.read_text()
+    try:
+        s.post(f"{BASE}/api/oracle/pin", json={"url": "https://www.iana.org/domains/reserved", "topic": "unpin test"})
+        s.post(f"{BASE}/api/oracle/pin", json={"url": "https://www.iana.org/help/example-domains", "topic": "unpin test"})
+        wait_idle(s)
+        assert s.post(f"{BASE}/api/oracle/unpin", json={"url": "https://x.y/", "topic": "unpin test"}).status_code == 404
+        assert s.post(f"{BASE}/api/oracle/unpin", json={"url": "https://x.y/", "topic": "nope"}).status_code == 404
+        r = s.post(f"{BASE}/api/oracle/unpin", json={"url": "https://www.iana.org/domains/reserved", "topic": "Unpin Test"}).json()
+        assert r["ok"] and r["seeds"] == ["https://www.iana.org/help/example-domains"] and not r["removed_topic"]
+        assert "domains/reserved" not in pinned.read_text()
+        r = s.post(f"{BASE}/api/oracle/unpin", json={"topic": "unpin test"}).json()
+        assert r["removed_topic"]
+        assert "unpin test" not in pinned.read_text()
+        assert all(t["name"] != "unpin test" for t in s.get(f"{BASE}/api/oracle").json()["topics"])
+    finally:
+        pinned.write_text(old)

@@ -172,6 +172,7 @@ show an amber **N new** badge when a refill found changed pages since you last l
 **Pin this source** under any source of an answer (or a Vault search result) makes that page a
 seed of a pinned topic in one tap - pick an existing topic or name a new one; oracled reads it
 right away and then on its schedule.
+Unpin with the **×** next to a seed, or **Unpin topic**; digests already written stay in `vault/topics`.
 
 Each pinned topic also gets, per refill, a **What changed** list (the sentences added and
 removed on each page since the last refill) and one **weekly roll-up** page,

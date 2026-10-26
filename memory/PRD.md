@@ -122,6 +122,9 @@ scripts, service unit files, and bootstrap artifacts for every phase (0 → 9).
 - Guide preview: the platform launches `yarn expo start --port 3000`; frontend/package.json now has an `expo` script → scripts/dev-shim.js that runs the CRA (craco) dev server on 0.0.0.0:3000 with host-check disabled. `yarn install` was needed in this environment (node_modules were the Expo template's). Device profile "Default LLM" options aligned to tiers (sonnet/opus/haiku).
 - Tests: test_torus_oracle.py 16/16 (pin), backend_test.py 34/34, other torus suites green.
 
+### 2026-10-26 · Unpin from Vault
+- POST /api/oracle/unpin {topic, url?} → removes one seed (url given) or the whole topic; rewrites pinned.yaml; 404 for unknown topic/seed. Vault UI: × on every seed row (oracle-unpin-seed), "Unpin topic" with confirm (oracle-unpin-topic). Digests stay in vault/topics. Tests: test_torus_oracle.py 17/17.
+
 ## Backlog (after 2026-10-26)
 - P1: on the S26 run `torus update && torus install 6 7`, then `torus llm verify` with the real key (the fake list in tests is a stand-in).
 - P2: Mongo use by the daemons, multi-device session roster, amber-high-contrast theme, replace HMAC manifest in the web app with the ML-DSA seal.
