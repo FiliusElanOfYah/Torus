@@ -58,6 +58,7 @@ torus: your local research assistant
   torus llm on|off|status|test|models
   torus llm verify           check the 3 model ids (sonnet/opus/haiku) against Anthropic and fix stale ones
   torus llm model <tier>     default tier: sonnet (answers), opus (code), haiku (fast and cheap)
+  torus llm auto on|off      auto-route: short follow-ups (no new URLs) go to Haiku, full answers keep the default
   torus llm model sonnet|opus      default model
   torus llm id sonnet|opus <id>    exact Anthropic model id
   torus search mode urls|brave|both  |  torus search count 1-10
@@ -248,8 +249,9 @@ cmd_llm() {
     test) ctl selftest llm ;;
     models) ctl models ;;
     verify) shift; ctl verify "$@" ;;
+    auto) case "${2:-}" in on) ctl conf llm auto_route=true ;; off) ctl conf llm auto_route=false ;; *) die "usage: torus llm auto on|off   (Haiku for short follow-ups)" ;; esac ;;
     status) ctl conf llm ;;
-    *) die "usage: torus llm on|off|status|test|models|verify [--check-only]|model <sonnet|opus|haiku>|id <tier> <id>" ;;
+    *) die "usage: torus llm on|off|status|test|models|verify [--check-only]|auto on|off|model <sonnet|opus|haiku>|id <tier> <id>" ;;
   esac
 }
 

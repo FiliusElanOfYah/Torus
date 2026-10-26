@@ -19,7 +19,9 @@ nav a.on{color:var(--amber);border-color:var(--amber)}
 nav a{position:relative}.badge{display:none;position:absolute;top:4px;right:2px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--amber);color:#111;font:700 10px/16px var(--mono);text-align:center;letter-spacing:0}.badge.on{display:inline-block}
 .pill.new{color:#111;background:var(--amber);border-color:var(--amber);font-size:11px;padding:1px 8px}
 .doc{display:block;padding:10px 0;border-bottom:1px solid var(--line);color:var(--text);text-decoration:none}.doc small{display:block;color:var(--dim);font:12px var(--mono);margin-top:2px}
-.answer li.hit{background:#2a2410;border-radius:4px}
+.answer .hit{background:#2a2410;border-radius:4px;outline:2px solid var(--amber);outline-offset:4px}
+.dl{font-size:13px;margin:4px 0 0;padding-left:0;list-style:none}.dl li{padding:3px 0;border-bottom:1px dashed var(--line)}.dl .add{color:var(--green)}.dl .rm{color:var(--red)}
+mark{background:#3a3000;color:var(--amber);border-radius:2px}
 main{padding:16px;max-width:860px;margin:0 auto;padding-bottom:calc(env(safe-area-inset-bottom) + 32px)}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
 label{display:block;font:600 12px var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:12px 0 6px}
@@ -100,7 +102,7 @@ function md(src) {
     .replace(/\[(\d{1,2})\]/g, '<a class="cite" href="#" data-cite="$1">[$1]</a>');
   return s.split(/\n{2,}/).map(b => {
     if (/^\u0000\d+\u0000$/.test(b.trim())) return "<pre>" + blocks[+b.trim().slice(1, -1)] + "</pre>";
-    const h = b.match(/^(#{1,3})\s+(.*)/); if (h) return `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`;
+    const h = b.match(/^(#{1,3})\s+(.*)/); if (h) { const rest = b.slice(h[0].length).replace(/^\n+/, ""); return `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>` + (rest ? md(rest) : ""); }
     const lines = b.trim().split("\n");
     if (lines.every(l => /^\s*([-*]|\d+\.)\s+/.test(l))) { const tag = /^\s*\d+\./.test(lines[0]) ? "ol" : "ul"; return `<${tag}>` + lines.map(l => "<li>" + inline(l.replace(/^\s*([-*]|\d+\.)\s+/, "")) + "</li>").join("") + `</${tag}>`; }
     return "<p>" + inline(b).replace(/\n/g, "<br>") + "</p>";
@@ -344,7 +346,10 @@ async function viewVault() {
   $("#view").innerHTML = `<div class="card"><label style="margin-top:0" for="vq">Search your index</label>
     <div class="row"><input type="text" id="vq" data-testid="vault-search-input" placeholder="words..." style="flex:1"><button class="primary" id="vgo" data-testid="vault-search-button">Search</button></div></div>
     <div id="vres" data-testid="vault-results"></div>
-    <div class="card" data-testid="vault-docs"><label style="margin-top:0">Dossiers</label>
+    <div class="card" data-testid="vault-docs"><label style="margin-top:0" for="dq">Find in dossiers</label>
+      <div class="row"><input type="text" id="dq" data-testid="docs-find-input" placeholder="words in answers, pages and digests" style="flex:1"><button id="dgo" data-testid="docs-find-button">Find</button></div>
+      <div id="dres" data-testid="docs-find-results"></div>
+      <label>Browse</label>
       <div class="seg" id="doc-seg" data-testid="docs-folder-toggle">${["answers","inbox","topics"].map(d=>`<button data-dir="${d}" class="${d===docDir?"on":""}" data-testid="docs-folder-${d}">${d==="inbox"?"Pages read":d[0].toUpperCase()+d.slice(1)}</button>`).join("")}</div>
       <div id="docs-body" data-testid="docs-list"><p class="hint">loading…</p></div></div>
     <div class="card" data-testid="vault-oracle"><label style="margin-top:0">Pinned topics (oracled)</label>
@@ -361,6 +366,18 @@ async function viewVault() {
   };
   $("#vgo").onclick = go; $("#vq").onkeydown = e => { if (e.key === "Enter") go(); };
   renderDocs();
+  const find = async () => {
+    const q = $("#dq").value.trim(); const el = $("#dres");
+    if (q.length < 2) { el.innerHTML = q ? `<p class="hint">Type at least two characters.</p>` : ""; return; }
+    try { const r = await api("/api/vault/find?q=" + encodeURIComponent(q) + "&dir=all");
+      const words = (q.toLowerCase().match(/[\p{L}\p{N}_]+/gu) || []).filter(w => w.length >= 2);
+      const rx = words.length ? new RegExp("(" + words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")", "giu") : null;
+      const hl = t => rx ? t.split(rx).map((piece, i) => i % 2 ? `<mark>${esc(piece)}</mark>` : esc(piece)).join("") : esc(t);
+      el.innerHTML = r.hits.length ? `<p class="hint">${r.hits.length} matching paragraph${r.hits.length===1?"":"s"}</p>` + r.hits.map(h => `<a class="doc" href="#/doc/${encodeURIComponent(h.rel)}?p=${h.idx}" data-testid="docs-find-hit"><span>${esc(h.title)} <span class="hint">· ${h.dir === "inbox" ? "page" : h.dir === "topics" ? "digest" : "answer"}</span></span><small style="white-space:normal;color:var(--text);font:14px system-ui,sans-serif;opacity:.85">${hl(h.para)}</small></a>`).join("")
+        : `<p class="hint" data-testid="docs-find-empty">Nothing matches “${esc(q)}”.</p>`;
+    } catch (err) { toast(err.message); }
+  };
+  $("#dgo").onclick = find; $("#dq").onkeydown = e => { if (e.key === "Enter") find(); };
   $("#doc-seg").onclick = e => { const b = e.target.closest("button[data-dir]"); if (!b) return; docDir = b.dataset.dir; localStorage.setItem("torus_doc_dir", docDir);
     $("#doc-seg").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); renderDocs(); };
   renderOracle();
@@ -398,8 +415,10 @@ async function renderOracle() {
   const sched = o.enabled ? `every ${o.every_minutes} min · next ${o.next_run ? new Date(o.next_run * 1000).toLocaleTimeString() : "soon"}` : "schedule paused (torus oracle on)";
   el.innerHTML = `<p class="hint" data-testid="oracle-summary">${o.daemon === "down" ? `<b class="s-error">oracled is down</b> · ` : ""}${o.running ? `<b class="s-ok">refilling…</b> ${esc(o.current)} · ` : ""}${esc(sched)}${o.last_run ? ` · last run ${esc(when(o.last_run))}` : ""}${o.error ? `<br><span class="s-error">${esc(o.error)}</span>` : ""}</p>` +
     (o.topics.length ? o.topics.map(t => `<details class="svc" style="display:block" data-topic="${esc(t.name)}" data-testid="oracle-topic-${esc(t.name)}" ${open.has(t.name) ? "open" : ""}><summary style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;list-style:none;gap:8px;min-height:44px"><span><b>${esc(t.name)}</b> <span class="hint">${t.seeds.length} seed${t.seeds.length===1?"":"s"}</span>${t.changed && t.changed_at > (oracleSeen[t.name] || 0) ? ` <span class="pill new" data-testid="oracle-new-${esc(t.name)}">${t.changed} new</span>` : ""}</span><span style="white-space:nowrap">${t.when ? `<span class="${t.fail?"s-needs_you":"s-ok"}">${t.ok}/${t.seeds.length} ok</span> · ${esc(new Date(t.when*1000).toLocaleString())}` : '<span class="hint">not refilled yet</span>'}</span></summary>
-      ${t.seeds.map(u => { const r = (t.results || []).find(x => x.url === u) || {}; return `<div class="hint" style="margin:4px 0 0;display:flex;gap:8px;justify-content:space-between;align-items:center;min-height:32px"><a href="${esc(u)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.title || u)}</a><span class="${oracleCls[r.status] || "hint"}" style="white-space:nowrap">${r.changed ? '<span class="s-needs_you">changed · </span>' : ""}${r.status ? esc(r.status) + (r.error ? ": " + esc(r.error) : "") : "–"}</span></div>`; }).join("")}
-      <div class="row" style="margin-top:8px"><button data-topic="${esc(t.name)}" data-testid="oracle-run-topic" ${o.running?"disabled":""}>Refill this topic</button>${t.digest ? `<a class="btnlink" href="#/doc/${encodeURIComponent("topics/" + t.digest.split("/").pop())}" data-testid="oracle-digest-link">Read digest</a>` : ""}</div></details>`).join("")
+      ${t.seeds.map(u => { const r = (t.results || []).find(x => x.url === u) || {}; const d = r.diff || {}; const hasDiff = !d.first && ((d.added || []).length || (d.removed || []).length);
+        return `<div class="hint" style="margin:4px 0 0;display:flex;gap:8px;justify-content:space-between;align-items:center;min-height:32px"><a href="${esc(u)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.title || u)}</a><span class="${oracleCls[r.status] || "hint"}" style="white-space:nowrap">${r.changed ? `<span class="s-needs_you">${d.first ? "first read" : "changed"} · </span>` : ""}${r.status ? esc(r.status) + (r.error ? ": " + esc(r.error) : "") : "–"}</span></div>` +
+        (hasDiff ? `<details data-testid="oracle-diff"><summary class="hint" style="cursor:pointer;min-height:36px;display:flex;align-items:center">${r.changed ? "What changed" : "Last change " + esc(r.diff_when ? new Date(r.diff_when * 1000).toLocaleDateString() : "")}: <span class="s-ok">&nbsp;+${d.n_added}</span>&nbsp;/&nbsp;<span class="s-error">−${d.n_removed}</span>&nbsp;sentences</summary><ul class="dl">${(d.added || []).map(x => `<li class="add">+ ${esc(x)}</li>`).join("")}${(d.removed || []).map(x => `<li class="rm">− ${esc(x)}</li>`).join("")}</ul></details>` : ""); }).join("")}
+      <div class="row" style="margin-top:8px"><button data-topic="${esc(t.name)}" data-testid="oracle-run-topic" ${o.running?"disabled":""}>Refill this topic</button>${t.digest ? `<a class="btnlink" href="#/doc/${encodeURIComponent("topics/" + t.digest.split("/").pop())}" data-testid="oracle-digest-link">Read digest</a>` : ""}${t.rollup ? `<a class="btnlink" href="#/doc/${encodeURIComponent("topics/" + t.rollup.split("/").pop())}" data-testid="oracle-rollup-link">This week</a>` : ""}</div></details>`).join("")
     : `<p class="hint" data-testid="oracle-empty">No pinned topics yet. Tap “Edit topics”.</p>`);
   const runBtn = $("#oracle-run"); if (runBtn) runBtn.disabled = !!o.running;
   el.querySelectorAll("details[data-topic]").forEach(d => d.addEventListener("toggle", () => { if (!d.open) return;
@@ -420,7 +439,8 @@ async function renderDocs() {
   } catch (err) { el.innerHTML = `<p class="hint" data-testid="docs-missing">${esc(err.message)}</p>`; }
 }
 
-async function viewDoc(rel) {
+async function viewDoc(spec) {
+  const [rel, qs] = spec.split("?"); const para = qs ? +(new URLSearchParams(qs).get("p") ?? -1) : -1;
   const d = await api("/api/vault/doc?path=" + encodeURIComponent(rel));
   const m = d.meta || {};
   const facts = [m.url ? `<a href="${esc(m.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue)">${esc(m.url)}</a>` : "", m.fetched ? "read " + esc(m.fetched.replace("T", " ").slice(0, 16)) : "", m.created ? esc(m.created.replace("T", " ").slice(0, 16)) : "", m.refilled ? "refilled " + esc(m.refilled.replace("T", " ").slice(0, 16)) : "", m.engine ? "engine " + esc(m.engine) : "", m.job ? `<a href="#/job/${esc(m.job)}" data-testid="doc-job-link">open job ${esc(m.job)}</a>` : ""].filter(Boolean);
@@ -428,12 +448,14 @@ async function viewDoc(rel) {
     <h2 style="margin:8px 0 4px;font:700 18px var(--mono);color:var(--amber)" data-testid="doc-title">${esc(d.title)}</h2>
     <p class="hint" data-testid="doc-meta">${facts.join(" · ")}${facts.length ? " · " : ""}<code class="k">vault/${esc(d.rel)}</code></p>
     ${d.summary ? `<details data-testid="doc-summary"><summary class="hint" style="cursor:pointer;min-height:44px;display:flex;align-items:center">Key sentences (TextRank)</summary><div class="answer">${md(d.summary)}</div></details>` : ""}
-    <div class="answer" data-testid="doc-body">${md(d.text)}</div>
+    <div class="answer" data-testid="doc-body">${md(d.text.replace(/^#\s+[^\n]*\n+/, ""))}</div>
     ${d.truncated ? `<p class="warn">Showing the first ${(d.bytes/1e6).toFixed(1)} MB of this file.</p>` : ""}</div>`;
   const body = $("[data-testid=doc-body]");
   const srcHead = [...body.querySelectorAll("h2")].find(h => /^sources$/i.test(h.textContent.trim()));
   const srcList = srcHead && srcHead.nextElementSibling && /^[OU]L$/.test(srcHead.nextElementSibling.tagName) ? [...srcHead.nextElementSibling.children] : [];
   srcList.forEach((li, i) => li.id = "src-" + (i + 1));
+  const skip = /^#\s+[^\n]*\n+/.test(d.text) ? 1 : 0;  // the leading "# title" is shown in the header, not the body
+  if (para >= 0 && body.children[para - skip]) { const el = body.children[para - skip]; el.classList.add("hit"); el.setAttribute("data-testid", "doc-hit"); setTimeout(() => el.scrollIntoView({behavior: "smooth", block: "center"}), 50); }
   $("#view").onclick = e => {
     const c = e.target.closest("[data-cite]"); if (!c) return; e.preventDefault();
     const li = $("#src-" + c.dataset.cite); if (!li) { toast("Source " + c.dataset.cite + " is not listed in this file"); return; }
@@ -450,6 +472,9 @@ async function viewSettings() {
     <label>Default model</label>
     <div class="seg" data-testid="settings-model-toggle">${["sonnet","opus","haiku"].map(m=>`<button data-model="${m}" class="${s.model===m?"on":""}" data-testid="settings-model-${m}">${m[0].toUpperCase()+m.slice(1)}</button>`).join("")}</div>
     <p class="hint">Model id in use: <code class="k" data-testid="settings-model-id">${esc(s.model_id)}</code>. Sonnet for answers, Opus for code, Haiku when speed and cost matter more than depth.</p>
+    <label>Auto-route to Haiku</label>
+    <div class="seg" data-testid="settings-auto-toggle"><button data-auto="1" class="${s.auto_route?"on":""}" data-testid="settings-auto-on">On</button><button data-auto="0" class="${!s.auto_route?"on":""}" data-testid="settings-auto-off">Off</button></div>
+    <p class="hint">When on, short follow-ups (up to 240 characters, no new URLs) are answered by Haiku at a fraction of the cost; first answers and anything with a model picked by hand keep the default tier.</p>
     <p class="hint" data-testid="settings-anthropic-key">Anthropic key: <b class="${s.keys.anthropic?"s-ok":"s-error"}">${s.keys.anthropic?"stored":"not set"}</b>. Keys never go into the browser. Set one in Termux with <code class="k">torus key set anthropic</code></p></div>
   <div class="card" data-testid="settings-models"><label style="margin-top:0">Claude model ids</label>
     <div id="models-body"><p class="hint">loading…</p></div>
@@ -500,6 +525,7 @@ async function viewSettings() {
   $("#view").onclick = async e => {
     const b = e.target.closest("button"); if (!b) return; let body = null;
     if (b.dataset.llm) body = {llm_enabled: b.dataset.llm === "1"};
+    if (b.dataset.auto) body = {auto_route: b.dataset.auto === "1"};
     if (b.dataset.model) body = {model: b.dataset.model};
     if (b.dataset.search) { body = {search_mode: b.dataset.search}; askMode = b.dataset.search; }
     if (!body) return;

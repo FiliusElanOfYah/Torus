@@ -77,6 +77,11 @@ torus llm model haiku   # change the default tier;  torus llm id opus <exact-id>
 ```
 The Settings tab has the same: **Claude model ids → Verify model ids**, with a dropdown per tier.
 
+**Saving money:** `torus llm auto on` (or Settings → *Auto-route to Haiku*) sends short
+follow-ups (up to 240 characters, no new URLs) to Haiku; first answers, anything with a model
+you picked by hand, and follow-ups that add sources keep the default tier. The job log says
+when it happened.
+
 ## Step 7 (optional): Brave Search
 
 ```
@@ -163,6 +168,12 @@ Every answer, every page read and every topic digest is a Markdown file under `~
 The **Vault** tab lists them (Answers / Pages read / Topics); tap one to read it on the phone
 with headings, links and clickable `[n]` citations that jump to the source list. Pinned topics
 show an amber **N new** badge when a refill found changed pages since you last looked.
+**Find in dossiers** searches every answer, page and digest and opens the matching paragraph.
+
+Each pinned topic also gets, per refill, a **What changed** list (the sentences added and
+removed on each page since the last refill) and one **weekly roll-up** page,
+`vault/topics/<topic>-week-<year>-W<week>.md`, that collects every change of the week per
+seed — the *This week* button on the topic row opens it.
 
 ## Step 10: Hardening (seal + audit)
 

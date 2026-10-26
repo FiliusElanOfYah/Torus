@@ -36,6 +36,7 @@ from torus_common import (ETC, HOME, LLM_TOGGLE, MODEL_ALIASES, SEARCH_CONF, VAR
 from torus_report import build_pdf  # noqa: E402
 
 NAME = "gatewayd"
+AUTO_ROUTE_CHARS = 240  # follow-ups up to this long (and without new URLs) go to Haiku when auto_route=true
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("TORUS_PORT", "7777"))
 WEB = HOME / "web" / "index.html"
@@ -265,6 +266,10 @@ async def step_answer(j):
     srcs = [s for s in j["sources"] if s["status"] == "ok" and s.get("text")]
     st = llm_settings()
     model = t.get("model") or j.get("model") or st["model"]
+    if st["enabled"] and st["auto_route"] and not t.get("model") and not j.get("model") and t is not j and model != "haiku":
+        if len(t["question"]) <= AUTO_ROUTE_CHARS and not t.get("new_sources"):
+            model = "haiku"
+            note(j, f"auto-route: short follow-up, using Haiku (turn off in Settings or: torus llm auto off)")
     if st["enabled"] and key_present("anthropic"):
         try:
             res = await nreq("torus.llm.request", {"messages": build_messages(j, srcs), "system": SYSTEM,
@@ -419,7 +424,7 @@ async def api_followup(j, body):
     added = [add_source(j, u.strip(), "follow-up", limit=MAX_TOTAL_SOURCES) for u in urls
              if u.strip().startswith(("http://", "https://"))]
     j.setdefault("followups", []).append({"question": q, "answer": "", "engine": "", "warnings": [],
-                                          "model": model, "created": time.time()})
+                                          "model": model, "new_sources": sum(1 for a in added if a), "created": time.time()})
     note(j, f"follow-up: {q[:120]}" + (f" (+{sum(1 for a in added if a)} new sources)" if added else ""))
     j["status"] = "queued"
     start(j, "followup")
@@ -462,7 +467,7 @@ def settings_payload():
     llm, srch = llm_settings(), search_settings()
     c = read_conf(LLM_TOGGLE)
     last = torus_models.last() or {}
-    return {"llm_enabled": llm["enabled"], "model": llm["model"], "model_id": llm["model_id"],
+    return {"llm_enabled": llm["enabled"], "model": llm["model"], "model_id": llm["model_id"], "auto_route": llm["auto_route"],
             "sonnet_id": resolve_model("sonnet", c), "opus_id": resolve_model("opus", c), "haiku_id": resolve_model("haiku", c),
             "tiers": {t: {"id": resolve_model(t, c), "role": torus_models.TIER_ROLE[t],
                           "status": (last.get("tiers", {}).get(t) or {}).get("status", "unchecked")} for t in torus_models.TIERS},
@@ -475,6 +480,8 @@ async def api_settings(body):
     # validate everything first so a bad field never leaves a half-applied request
     if "model" in body and body["model"] not in MODEL_ALIASES:
         return err(400, "model must be sonnet, opus or haiku")
+    if "auto_route" in body and not isinstance(body["auto_route"], bool):
+        return err(400, "auto_route must be true or false")
     if "search_mode" in body and body["search_mode"] not in ("urls", "brave", "both"):
         return err(400, "search_mode must be urls, brave or both")
     if "search_count" in body:
@@ -489,6 +496,8 @@ async def api_settings(body):
             return err(400, why)
     if "llm_enabled" in body:
         write_conf(LLM_TOGGLE, {"enabled": "true" if body["llm_enabled"] else "false"})
+    if "auto_route" in body:
+        write_conf(LLM_TOGGLE, {"auto_route": "true" if body["auto_route"] is True else "false"})
     if "model" in body:
         write_conf(LLM_TOGGLE, {"model": body["model"]})
     if tier_ids:
@@ -613,7 +622,57 @@ def list_docs(folder, limit=200):
     return rows
 
 
+def doc_body(text):
+    """Same split the web page's md() uses, so paragraph indexes line up."""
+    body = text.split("\n---", 1)[1] if text.startswith("---\n") and "\n---" in text else text
+    return body.lstrip("\n")
+
+
+def find_in_docs(q, folders, limit=40, max_files=400):
+    words = [w for w in re.findall(r"\w+", q.lower()) if len(w) >= 2]
+    if not words:
+        return []
+    hits = []
+    for folder in folders:
+        d = VAULT / folder
+        if not d.is_dir():
+            continue
+        files = sorted((p for p in d.glob("*.md") if not p.name.startswith(".") and not p.name.endswith(".summary.md")),
+                       key=lambda p: p.stat().st_mtime, reverse=True)[:max_files]
+        for p in files:
+            try:
+                text = p.read_text(encoding="utf-8", errors="replace")[:DOC_MAX_BYTES]
+            except OSError:
+                continue
+            meta, title = doc_meta(text)
+            title = meta.get("title") or title or p.stem
+            for idx, para in enumerate(re.split(r"\n{2,}", doc_body(text))):
+                low = para.lower()
+                found = [w for w in words if w in low]
+                if not found:
+                    continue
+                score = len(found) * 10 + sum(low.count(w) for w in found)
+                snippet = " ".join(re.sub(r"(?m)^\s*(#+|[-*>]+|\d+\.)\s*", "", para).split())
+                low = snippet.lower()
+                pos = min(low.find(w) for w in found)
+                start = max(0, pos - 80)
+                snippet = ("…" if start else "") + snippet[start:start + 320] + ("…" if len(snippet) > start + 320 else "")
+                hits.append({"rel": f"{folder}/{p.name}", "dir": folder, "title": title, "idx": idx, "para": snippet,
+                             "score": score, "all": len(found) == len(words), "mtime": p.stat().st_mtime})
+    hits.sort(key=lambda h: (h["all"], h["score"], h["mtime"]), reverse=True)
+    return hits[:limit]
+
+
 async def api_vault_docs(path, query):
+    if path == "/api/vault/find":
+        q = (query.get("q") or [""])[0].strip()
+        folder = (query.get("dir") or ["all"])[0]
+        if folder != "all" and folder not in DOC_DIRS:
+            return err(400, "dir must be all, inbox, answers or topics")
+        if len(q) < 2:
+            return err(400, "type at least two characters")
+        hits = await asyncio.to_thread(find_in_docs, q, list(DOC_DIRS) if folder == "all" else [folder])
+        return 200, {"q": q, "hits": hits}
     if path == "/api/vault/docs":
         folder = (query.get("dir") or ["answers"])[0]
         if folder not in DOC_DIRS:
@@ -630,9 +689,8 @@ async def api_vault_docs(path, query):
         raw = await asyncio.to_thread(p.read_bytes)
         text = raw[:DOC_MAX_BYTES].decode("utf-8", errors="replace")
         meta, title = doc_meta(text)
-        body = text.split("\n---", 1)[1] if text.startswith("---\n") and "\n---" in text else text
         out = {"rel": f"{p.parent.name}/{p.name}", "name": p.name, "title": meta.get("title") or title or p.stem, "meta": meta,
-               "text": body.lstrip("\n"), "bytes": len(raw), "truncated": len(raw) > DOC_MAX_BYTES, "mtime": p.stat().st_mtime}
+               "text": doc_body(text), "bytes": len(raw), "truncated": len(raw) > DOC_MAX_BYTES, "mtime": p.stat().st_mtime}
         summary = p.with_name(p.name[:-3] + ".summary.md")
         if p.parent.name == "inbox" and summary.is_file():
             out["summary"] = summary.read_text(encoding="utf-8", errors="replace")

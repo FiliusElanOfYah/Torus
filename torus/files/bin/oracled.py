@@ -25,7 +25,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from torus_common import (ETC, LOGS, VAR, VAULT, append_jsonl, atomic_write, extract, log, pack,  # noqa: E402
-                          read_conf, run_daemon, slugify, textrank, truthy)
+                          read_conf, run_daemon, slugify, split_sentences, textrank, truthy)
 
 NAME = "oracled"
 PINNED = ETC / "pinned.yaml"
@@ -33,6 +33,8 @@ CONF = ETC / "oracle.conf"
 STATE_FILE = VAR / "oracle.json"
 RUN_LOG = LOGS / "oracle.jsonl"
 TOPICS_DIR = VAULT / "topics"
+SEED_DIR = VAR / "oracle"       # <topic-slug>/<url-hash>.txt = sentences last seen; history.jsonl = changes
+DIFF_KEEP = 12                  # sentences kept per side of a change
 MAX_SEEDS = 25
 MAX_TOPICS = 40
 TICK = 30
@@ -185,7 +187,7 @@ def status_payload():
         results = [r for r in st.get("results", []) if r["url"] in t["seeds"]]
         ok = sum(1 for r in results if r["status"] == "ok")
         rows.append({"name": t["name"], "seeds": t["seeds"], "when": st.get("when", 0), "ok": ok,
-                     "fail": len(results) - ok, "results": results, "digest": st.get("digest", ""),
+                     "fail": len(results) - ok, "results": results, "digest": st.get("digest", ""), "rollup": st.get("rollup", ""),
                      "changed": sum(1 for r in results if r.get("changed")), "changed_at": st.get("changed_at", 0)})
     return {"ok": True, "enabled": conf["enabled"], "every_minutes": conf["every_minutes"], "fresh": conf["fresh"],
             "last_run": STATE["last_run"], "next_run": STATE["next_run"], "runs": STATE["runs"],
@@ -200,6 +202,95 @@ async def fetch_seed(nc, url, fresh):
         return json.loads(msg.data)
     except Exception as e:
         return {"ok": False, "error": f"fetcherd did not answer ({e.__class__.__name__}): torus status"}
+
+
+def seed_file(topic, url):
+    return SEED_DIR / slugify(topic["name"]) / (hashlib.sha1(url.encode("utf-8")).hexdigest()[:12] + ".txt")
+
+
+def sentence_diff(topic, url, text):
+    """Compare this page's sentences with the ones seen last time; remember the new set.
+    -> {"added": [...], "removed": [...], "n_added": n, "n_removed": n}  (lists capped at DIFF_KEEP)"""
+    path = seed_file(topic, url)
+    seen, now = [], []
+    for sent in split_sentences(text):
+        if sent not in now:
+            now.append(sent)
+    try:
+        seen = [ln for ln in path.read_text(encoding="utf-8").split("\n") if ln]
+    except FileNotFoundError:
+        pass
+    new_set, old_set = set(now), set(seen)
+    added = [x for x in now if x not in old_set]
+    removed = [x for x in seen if x not in new_set]
+    atomic_write(path, "\n".join(now) + "\n")
+    return {"added": added[:DIFF_KEEP], "removed": removed[:DIFF_KEEP], "n_added": len(added), "n_removed": len(removed),
+            "first": not seen}
+
+
+def history_file(topic):
+    return SEED_DIR / slugify(topic["name"]) / "history.jsonl"
+
+
+def read_history(topic, since=0):
+    out = []
+    try:
+        for ln in history_file(topic).read_text(encoding="utf-8").splitlines():
+            try:
+                e = json.loads(ln)
+            except ValueError:
+                continue
+            if e.get("when", 0) >= since:
+                out.append(e)
+    except FileNotFoundError:
+        pass
+    return out
+
+
+def week_of(ts):
+    return time.strftime("%G-W%V", time.localtime(ts))
+
+
+def week_start(ts):
+    lt = time.localtime(ts)
+    day = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+    return day - lt.tm_wday * 86400
+
+
+def rollup_path(topic, ts):
+    return TOPICS_DIR / f"{slugify(topic['name'])}-week-{week_of(ts)}.md"
+
+
+def write_rollup(topic, when):
+    """One page per topic per ISO week: every change oracled saw, grouped by seed, newest first."""
+    entries = read_history(topic, week_start(when))
+    refills = [e for e in entries if e.get("kind") == "refill"]
+    changes = [e for e in entries if e.get("kind") == "change"]
+    stamp = lambda t: time.strftime("%a %d %b %H:%M", time.localtime(t))  # noqa: E731
+    parts = [f"---\ntopic: {json.dumps(topic['name'])}\nweek: {week_of(when)}\nrefills: {len(refills)}\nchanges: {len(changes)}\n"
+             f"updated: {time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(when))}\n---\n\n"
+             f"# {topic['name']} - week {week_of(when)}\n\n"
+             f"_{len(refills)} refill{'s' if len(refills) != 1 else ''} this week, {len(changes)} page change"
+             f"{'s' if len(changes) != 1 else ''} across {len({c['url'] for c in changes})} of {len(topic['seeds'])} seeds. "
+             f"Written by oracled after every refill; the per-refill digest is {slugify(topic['name'])}.md._\n"]
+    if not changes:
+        parts.append("No page changed this week so far." if refills else "No refill has run this week yet.")
+    for url in topic["seeds"]:
+        mine = [c for c in changes if c["url"] == url]
+        if not mine:
+            continue
+        mine.sort(key=lambda c: c["when"], reverse=True)
+        parts.append(f"## {mine[0].get('title') or url}\n\n{url}  \n{len(mine)} change{'s' if len(mine) != 1 else ''} this week\n")
+        for c in mine:
+            lines = [f"### {stamp(c['when'])}" + (" - first read" if c.get("first") else f" - +{c['n_added']} / -{c['n_removed']} sentences"), ""]
+            lines += [f"- + {x}" for x in c.get("added", [])]
+            lines += [f"- − {x}" for x in c.get("removed", [])]
+            if c["n_added"] > len(c.get("added", [])) or c["n_removed"] > len(c.get("removed", [])):
+                lines.append(f"- … {max(0, c['n_added'] - len(c.get('added', [])))} more added, {max(0, c['n_removed'] - len(c.get('removed', [])))} more removed")
+            parts.append("\n".join(lines) + "\n")
+    path = rollup_path(topic, when)
+    atomic_write(path, "\n".join(parts))
+    return str(path)
 
 
 def write_digest(topic, results, when):
@@ -218,7 +309,12 @@ def write_digest(topic, results, when):
             continue
         sents = "\n".join(f"- {s}" for s in r.get("key", [])) or "- (no readable sentences)"
         tag = " · **changed since last refill**" if r.get("changed") and r.get("hash") else ""
-        parts.append(head + f"{r.get('chars', 0)} chars{' (from cache)' if r.get('cached') else ''}{tag}\n\n{sents}\n")
+        d = r.get("diff") or {}
+        diff = ""
+        if r.get("changed") and not d.get("first") and (d.get("added") or d.get("removed")):
+            diff = f"\n\n**What changed** (+{d['n_added']} / -{d['n_removed']} sentences)\n\n" + "\n".join(
+                [f"- + {x}" for x in d["added"][:6]] + [f"- − {x}" for x in d["removed"][:6]])
+        parts.append(head + f"{r.get('chars', 0)} chars{' (from cache)' if r.get('cached') else ''}{tag}\n\n{sents}{diff}\n")
     atomic_write(path, "\n".join(parts))
     return str(path)
 
@@ -247,14 +343,23 @@ async def run_topic(nc, topic, fresh):
                 h = hashlib.sha256(" ".join(text.split()).encode("utf-8")).hexdigest()[:16]
                 row.update(title=title or url, chars=len(text), key=await asyncio.to_thread(textrank, text, 3),
                            hash=h, changed=h != prev.get(url, {}).get("hash", ""))
+                if row["changed"]:
+                    row["diff"] = await asyncio.to_thread(sentence_diff, topic, url, text)
+                    row["diff_when"] = time.time()
+                    append_jsonl(history_file(topic), {"kind": "change", "when": row["diff_when"], "url": url, "title": row["title"],
+                                                       **row["diff"]})
+                elif prev.get(url, {}).get("diff"):  # keep the last change visible until the next one
+                    row["diff"], row["diff_when"] = prev[url]["diff"], prev[url].get("diff_when", 0)
         results.append(row)
         log(NAME, topic["name"], row["status"], url, "changed" if row["changed"] else "", row["error"])
     when = time.time()
     ok = sum(1 for r in results if r["status"] == "ok")
     changed = sum(1 for r in results if r["changed"])
     digest = write_digest(topic, results, when)
+    append_jsonl(history_file(topic), {"kind": "refill", "when": when, "ok": ok, "fail": len(results) - ok, "changed": changed})
+    rollup = write_rollup(topic, when)
     old = STATE["topics"].get(topic["name"]) or {}
-    STATE["topics"][topic["name"]] = {"when": when, "ok": ok, "fail": len(results) - ok, "digest": digest,
+    STATE["topics"][topic["name"]] = {"when": when, "ok": ok, "fail": len(results) - ok, "digest": digest, "rollup": rollup,
                                       "changed": changed, "changed_at": when if changed else old.get("changed_at", 0),
                                       "results": [{k: v for k, v in r.items() if k != "key"} for r in results]}
     save_state()

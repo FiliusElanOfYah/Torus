@@ -1,0 +1,46 @@
+{
+  "summary": "Iteration 10 (TORUS gatewayd/oracled + phone web page, fake Claude). Backend: auto-route to Haiku, dossier find, sentence diff + weekly rollup all behave as specified (my suite 7/7 incl. boundary 240 chars, already-known URL, a truly new local URL, auto off; CLI via torusctl conf llm auto_route=true/false works). Regression suites test_torus_models_docs + test_torus_oracle 34/34 pass. Main agent's test_torus_autoroute_diff.py now 5/6: test_auto_route_short_followup_uses_haiku fails because it is env-dependent. UI (390x844): the Settings auto-route toggle, Vault Find (marks, ?p=N, doc-hit highlighted and centred, doc-back, empty state, Enter key), the oracle topic row ('changed ·', oracle-diff +/− in green/red), the This week and Read digest links, models-verify and vault-search all work. Two UI bugs found: (1) the weekly rollup reader drops every +/− sentence line, so only the ### headings show; (2) the Find highlight breaks into visible '<mark>' text when a query word matches 'mark'.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/settings {auto_route}", "issue": "Uses Python truthiness: auto_route:'false' (string) turns auto-route ON. Reference: files/bin/gatewayd.py:497-498. Accept bool only, or parse strings with truthy()."},
+      {"endpoint": "oracled write_rollup", "issue": "Each change block is written as '### <stamp> - +1 / -1 sentences\\n- + ...' with no blank line after the heading. Python find splits it as one paragraph, which is fine, but the web md() renderer turns it into the heading alone (see UI bug). Reference: files/bin/oracled.py:285-290."},
+      {"endpoint": "oracled write_rollup", "issue": "The 'changes:' frontmatter counts history entries for every URL, but sections are only drawn for URLs still in topic.seeds. If a seed is removed mid-week, the counts disagree with the body. Also, a hash change with no sentence change (short sentences, whitespace) is logged as '+0 / -0 sentences'."},
+      {"endpoint": "oracled / topic row", "issue": "Design: the diff only lives in the latest refill's results. The next unchanged refill clears 'changed ·', the oracle-diff block, the 'N new' pill and the digest 'What changed' section. With scheduled refills a user can miss a change unless they open 'This week'. Consider keeping last_diff/changed_at per seed."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Doc reader rendering the weekly rollup (#/doc/topics/<slug>-week-YYYY-Www.md)", "issue": "md() (web/index.html:105) returns only <hN> when a block starts with '#', and drops the lines after it in the same block. The rollup puts '### stamp' and the '- + / - −' lines in one block, so the reader shows just 'Mon 26 Oct 19:53 - +1 / -1 sentences' headings and none of the sentences. A Find hit on a rollup paragraph opens a highlighted heading with the matched sentence missing. Fix: in oracled write a blank line after the ### heading (lines = [heading, ''] + ...), and/or make md() render the rest of a heading block.", "testID": "doc-body", "priority": "HIGH"},
+      {"component": "Vault Find highlight hl()", "issue": "Words are replaced one by one in the already-escaped HTML. Query 'klein mark' shows '<mark>Kleinmark> bottle' as literal text, because the second word matches the inserted <mark> tags. Words like 'amp', 'quot', 'lt', 'gt' would break HTML entities the same way. Reference: web/index.html:374. Fix: build one alternation regex and apply it once to the raw text, escaping the pieces (split, then esc each part)." , "testID": "docs-find-hit", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Vault Find", "issues": ["Typing 1 character and pressing Find silently clears the results; no 'type at least two characters' hint.", "JS \\w is ASCII-only, Python \\w is Unicode, so for a query like 'möbius' the server matches 'möbius' but the client highlights only 'bius'.", "doc-hit highlights the whole block (a 960px tall <ul> for answers). The matched words are not <mark>ed in the reader, so finding the hit inside a long list is hard."]},
+      {"screen": "Settings auto-route", "issues": ["Hint says 'under 240 characters', but the code routes <=240 (exactly 240 is routed). Wording should say 'up to 240'."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_torus_iter10_t1.py", "/app/backend/tests/manual_tdiff_change.py", "/app/test_reports/pytest/iter10_t1.xml"],
+  "action_items": [
+    "HIGH: fix the weekly rollup rendering in the reader. Put a blank line after each '### <stamp>' heading in oracled.write_rollup (or let md() render the lines after a heading in the same block), then check that oracle-rollup-link shows the +/− sentences.",
+    "MEDIUM: rewrite the hl() highlight in the Vault Find results as a single pass over the raw text (escape each segment) so words like 'mark'/'amp' don't corrupt the markup.",
+    "Make test_torus_autoroute_diff.py::test_auto_route_short_followup_uses_haiku hermetic. Its 'new' URL https://www.iana.org/domains/reserved is already pulled into the job as a vault source (mode urls adds vault hits), so the follow-up adds '+0 new sources' and is correctly auto-routed, which fails the assert. Use a unique never-seen URL, e.g. a local server URL with a timestamp.",
+    "Minor: in POST /api/settings, validate auto_route (and llm_enabled) as real booleans.",
+    "Minor: change the Settings hint 'under 240' to 'up to 240'; add a hint when the Find query is under 2 characters."
+  ],
+  "critical_code_review_comments": [
+    "gatewayd.step_answer auto-route also skips routing when the original ask had a hand-picked model (j.model). That matches 'no model picked by hand', but it means one explicit model on the first question disables routing for the whole job's follow-ups.",
+    "A follow-up URL that is already a source (pasted or pulled from the vault) counts as 'not new' and the turn is routed to Haiku. This is consistent with the spec, but users may not expect it when they paste a URL.",
+    "find_in_docs vs md(): both split on \\n{2,}, but md() first swaps ``` fences for placeholders. A fenced code block that contains blank lines will shift every later idx, so ?p=N would highlight the wrong element.",
+    "week_start() uses day - tm_wday*86400 in local time; across a DST change this is off by one hour (it includes or excludes one hour of Sunday's history). Minor.",
+    "Test pages from earlier runs (127.0.0.1:8098/8099, and now 8111) sit in the vault and get pulled into user jobs as 'vault' sources in mode urls. They are test pollution only."
+  ],
+  "updated_files": ["/app/backend/tests/test_torus_iter10_t1.py (new)", "/app/backend/tests/manual_tdiff_change.py (new helper)"],
+  "success_rate": {"backend": "100% of spec behaviours (my suite 7/7; regression 34/34; main agent's autoroute_diff 5/6, the failure is test brittleness)", "frontend": "~85% (all flows work; rollup reader content and find highlight bugs)"},
+  "seed_data_creation": "Topic 'tdiff' (seed http://127.0.0.1:8111/tdiff.html) was refilled 4 times; it left vault/topics/tdiff.md, tdiff-week-2026-W44.md and var/oracle/tdiff/. pinned.yaml was restored to the original 'example' topic. llm.toggle is back to enabled=false, auto_route=false. Several jobs were created by ask/follow-up tests.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Mesh at /tmp/torus-test (fake Claude). test_torus_iter10_t1.py serves the page on 127.0.0.1:8111 and resets var/oracle/tdiff each run. Run it with KEEP_TDIFF=1 to keep tdiff in pinned.yaml for UI checks, then restore it from /tmp/pinned.orig.yaml (original: example topic). Use manual_tdiff_change.py to produce one more diff for the UI. The '11 running' in the header counts old needs_you jobs from the example.com tests, which is not a bug in this round.",
+  "rca_of_issue": "Rollup reader: oracled.write_rollup joins the heading and list lines with a single '\\n'. web md() treats a block whose first line starts with '#' as a heading and returns only <hN>, dropping the remaining lines. Reproduce: run the tdiff refill twice with a changed sentence, then Vault > tdiff > This week; the body shows only the '### Mon ..' headings. Highlight: hl() applies a regex per word on the escaped string, so a later word matches inside the earlier <mark> tags. Reproduce: Find 'klein mark'."
+}

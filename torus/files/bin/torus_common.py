@@ -85,6 +85,8 @@ def llm_settings():
         "model": model,
         "model_id": resolve_model(model, c),
         "max_tokens": int(c.get("max_tokens") or 4096),
+        # auto_route=true: short follow-ups without new URLs go to Haiku (cheap); full answers keep the default tier
+        "auto_route": truthy(c.get("auto_route", "false")),
     }
 
 
