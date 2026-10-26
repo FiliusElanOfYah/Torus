@@ -1,0 +1,42 @@
+{
+  "summary": "Phase 7 oracled tested end-to-end on the running mesh. Backend: new suite test_torus_oracle_t1.py has 18/18 passing, and backend_test.py has 33/33 passing (51 in total). Covered: GET /api/oracle shape (no daemon:down); config rejects ftp seeds, duplicate names and malformed YAML with 400 and leaves the file untouched; valid config gives 200 and rewrites pinned.yaml; run, a refused second run ('already running'), and topic 'nope' giving ok:false; topic match ignores case; the digest example.md contains '# example' and the URL; CLI oracle status/check and conf every_minutes=120 (set back to 60); /api/search regression; phases 7/8/9 catalog. Phone web page Vault card (390x844) works: the card, summary, expandable topic, editor prefill, invalid save (error toast, nothing saved), valid save (iana2 appears, 'Topics saved'), 'Refill all now' (refilling… then a new last-run time) and 'Refill this topic'. One real UI bug: pressing 'Refill all now' while a refill is running shows a false 'Refill started' toast.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/oracle/run", "issue": "Returns HTTP 200 with {ok:false,error} when a refill is already running or the topic is unknown. Clients that only check the HTTP status, like the web page api(), treat it as success."},
+      {"endpoint": "GET /api/phases/8", "issue": "The step 8.1 troubleshooting text says 'no liboqs, cmake or clang build is needed'. This only mentions liboqs to say it is not needed, but it does not meet the literal 'no step mentions liboqs' requirement."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Vault > Pinned topics > Refill all now", "issue": "Clicking during a running refill shows the toast 'Refill started', but the server answered {ok:false,error:'a refill is already running'}. Cause: api() in web/index.html:78-85 only throws when !r.ok, and the run handler at index.html:353 never checks j.ok. The same happens for the per-topic button at index.html:365. The 'Refill all now' button is also not disabled while o.running, unlike oracle-run-topic.", "testID": "oracle-run", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Vault tab (phone web page)", "issues": [
+        "Seed links inside an expanded topic use the browser default rgb(0,0,238) on the card background rgb(19,23,21). Contrast is about 2:1 (fails WCAG). Give 'a' a theme color.",
+        "Topic summary rows (data-testid=oracle-topic-*) are only about 18px tall, well below the 44px touch target. Add padding.",
+        "Every poll re-render (renderOracle every 3s while running) replaces the <details>, so an expanded topic collapses on its own during a refill.",
+        "Poll chains stack: each run click or save calls renderOracle(), which starts another 3s setTimeout loop. I saw 7 GETs in about 10s instead of about 4. Keep one timer handle and clear it first."
+      ]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_torus_oracle_t1.py", "/app/test_reports/pytest/pytest_oracle_t1.xml"],
+  "action_items": [
+    "web/index.html: in the oracle-run and oracle-run-topic handlers, check the response (if (!j.ok) throw new Error(j.error)), or make gatewayd return 409 for 'already running' and 404 for an unknown topic. Disable #oracle-run while o.running.",
+    "web/index.html: give links a theme color for contrast, add padding to topic <summary> rows (44px minimum), keep each topic's open state across re-renders, and de-duplicate the renderOracle polling timer.",
+    "Optional: reword the phase 8 troubleshooting text so it does not name liboqs, if the 'no liboqs mention' requirement is meant literally."
+  ],
+  "critical_code_review_comments": [
+    "The gateway enforces X-Torus only on POST; GET /api/oracle works without the header. This is the existing design (a CSRF guard), so I noted it but did not count it as a bug.",
+    "oracled.save_pinned accepts an empty yaml string and silently wipes every topic. Consider asking for confirmation in the UI.",
+    "When a manual run is for a single topic, run_all still sets last_run and next_run for the whole schedule, so a one-topic refill pushes back the next full scheduled refill. This may be intended."
+  ],
+  "updated_files": ["/app/backend/tests/test_torus_oracle_t1.py (new)"],
+  "success_rate": {"backend": "100% (51/51)", "frontend": "~90% (all requested flows pass; false-success toast on a second run)"},
+  "seed_data_creation": "Temporarily set pinned.yaml to example plus iana2 during the UI test, then restored the original (example with 2 seeds). Files vault/topics/iana2.md and the iana2 state in var/oracle.json were left behind; the state is dropped on the next run. oracle.conf every_minutes is back at 60.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "The mesh runs at TORUS_HOME=/tmp/torus-test with venv /tmp/tv/bin/python and the gateway at 127.0.0.1:7777. Refills of the iana and example.com seeds take only a few seconds. Run: python3 -m pytest -n 0 -p no:cacheprovider /app/backend/tests/test_torus_oracle_t1.py. The bash 'torus' wrapper refuses to run on the test home ('not installed'), so use torusctl.py directly."
+}

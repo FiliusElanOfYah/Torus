@@ -132,6 +132,20 @@ private token, so no other app on the phone can make TORUS write files or run co
 Claude can only propose file contents. Commands are only ever the ones you typed.
 Without AI: `torus code run <project> "<command>"`, or **Quick run** on the page.
 
+### Pinned topics (oracled, same `torus install 7`)
+
+Topics you want kept fresh go in `~/.torus/etc/pinned.yaml` — a name and a list of
+URLs each. Every hour (`every_minutes` in `etc/oracle.conf`) oracled re-reads every
+URL: the pages go into your index and `vault/inbox` like a normal `torus ask`, and
+one digest per topic lands in `vault/topics/<topic>.md` (what was read, when, key sentences).
+```
+torus oracle edit            # or the Vault tab -> Pinned topics -> Edit topics
+torus oracle run             # refill now; torus oracle run <topic> for one
+torus oracle                 # schedule, last/next run, every seed with ok/blocked/robots/empty
+torus oracle every 120       # change the interval (minutes);  torus oracle off  pauses it
+```
+No restart is needed after editing the file. No AI is used; it is fetch + extract only.
+
 ## Step 10: Hardening (seal + audit)
 
 ```
@@ -198,6 +212,6 @@ from editors are stripped automatically. `torus files` shows what differs.
 | 4 | summaries | summarizerd |
 | 5 | keys, redaction, Claude | airgapd, sentineld, llmd |
 | 6 | web page, `torus ask`, follow-ups, citation map, PDF reports | gatewayd |
-| 7 | coder: write, run and fix code in your projects | coderd |
+| 7 | coder: write, run and fix code in your projects; oracled: refills pinned topics on a schedule (`torus oracle`) | coderd, oracled |
 | 8 | hardening: ML-DSA-65 seal, `torus audit`, Claude off at boot, log pruning | none |
 | 9 | backup: `torus export` / `torus restore` (signed tarball) | none |

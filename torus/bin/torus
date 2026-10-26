@@ -9,7 +9,7 @@ LIB="$TORUS_SRC/torus/lib/common.sh"
 # shellcheck source=../lib/common.sh
 . "$LIB"
 CTL="$TORUS_HOME/bin/torusctl.py"
-ALL_SERVICES="nats-server torus-mongo fetcherd parserd indexerd vaultd summarizerd airgapd sentineld llmd gatewayd coderd"
+ALL_SERVICES="nats-server torus-mongo fetcherd parserd indexerd vaultd summarizerd airgapd sentineld llmd gatewayd coderd oracled"
 PHASES="0 1 2 3 4 5 6 7 8 9"
 
 usage() {
@@ -45,6 +45,12 @@ torus: your local research assistant
   torus code run <project> "<command>"   run a command in the project and show the output
   torus code tasks           recent write/run/fix tasks
   torus code root <dir>      change where projects live
+
+ PINNED TOPICS (oracled refills them on a schedule; digests in vault/topics)
+  torus oracle               status: schedule, last/next run, each topic and seed
+  torus oracle run [topic]   refill every topic (or one) right now
+  torus oracle topics        print ~/.torus/etc/pinned.yaml      torus oracle edit   opens it in your editor
+  torus oracle every <min>   refill interval (5-1440)             torus oracle on|off   pause the schedule
 
  KEYS AND SWITCHES
   torus key set anthropic|brave    store a key (typed hidden, file mode 600)
@@ -253,6 +259,19 @@ cmd_search() {
   esac
 }
 
+cmd_oracle() {
+  case "${1:-status}" in
+    status) ctl oracle status ;;
+    run) ctl oracle run "${2:-}" ;;
+    topics) cat "$TORUS_HOME/etc/pinned.yaml" 2>/dev/null || die "no pinned.yaml yet: torus install 7" ;;
+    edit) "${EDITOR:-nano}" "$TORUS_HOME/etc/pinned.yaml" && ctl oracle check ;;
+    on)  ctl conf oracle enabled=true ;;
+    off) ctl conf oracle enabled=false ;;
+    every) case "${2:-}" in ''|*[!0-9]*) die "usage: torus oracle every <minutes 5-1440>" ;; esac; ctl conf oracle "every_minutes=$2" ;;
+    *) die "usage: torus oracle [status|run [topic]|topics|edit|every <min>|on|off]" ;;
+  esac
+}
+
 cmd_logs() {
   local s="${1:-}" f
   [ -n "$s" ] || die "usage: torus logs <service> [-f]"
@@ -315,6 +334,7 @@ case "$cmd" in
   key) cmd_key "$@" ;;
   llm) cmd_llm "$@" ;;
   search) cmd_search "$@" ;;
+  oracle) cmd_oracle "$@" ;;
   audit) cmd_audit "$@" ;;
   seal) cmd_seal "$@" ;;
   export) case "${1:-}" in list|check) cmd_export "$@" ;; *) cmd_export export "$@" ;; esac ;;

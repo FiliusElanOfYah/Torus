@@ -111,4 +111,12 @@ scripts, service unit files, and bootstrap artifacts for every phase (0 → 9).
 
 ## Backlog (after 2026-10-24)
 - P1: verify real Claude model ids on the device (`torus llm models`).
-- P2: oracled (hourly refill of pinned topics), Mongo use by the daemons, multi-device session roster, dossier preview tab, amber-high-contrast theme, replace HMAC manifest in the web app with the ML-DSA seal, update backend/phases.py Phase 8/9 catalog to point at `torus install 8/9`.
+- P2: Mongo use by the daemons, multi-device session roster, dossier preview tab, amber-high-contrast theme, replace HMAC manifest in the web app with the ML-DSA seal.
+
+### 2026-10-26 · Phase 7 oracled + catalog sync
+- oracled.py (Phase 7, `torus install 7`): reads etc/pinned.yaml (PyYAML if present, else a built-in parser for the same subset), every `every_minutes` (etc/oracle.conf, keep; default 60, enabled/fresh/start_delay_seconds) asks fetcherd to re-fetch each seed (fresh=true bypasses the 24 h cache), extracts + TextRank key sentences, writes vault/topics/<topic>.md, state in var/oracle.json, log logs/oracle.jsonl, emits torus.oracle.done. NATS: torus.oracle.status|run|reload. Resumes schedule across restarts (next_run from last_run); one refill at a time.
+- gatewayd: GET /api/oracle (falls back to file state + daemon:"down" when oracled is silent), POST /api/oracle/run {topic?}, GET/POST /api/oracle/config {yaml} (validated, atomically rewritten). Vault tab card: schedule, per-topic/per-seed status, Refill all / Refill this topic, YAML editor.
+- CLI: `torus oracle [status|run [topic]|topics|edit|every <min>|on|off]` (torusctl oracle status|run|check; conf oracle).
+- backend/phases.py: Phase 7/8/9 catalog rewritten around `torus install 7/8/9` (coderd/oracled usage, seal + 13-check audit + hardening.conf, export/check/restore); opsec labels match torus_audit.py. 10 opsec items kept.
+- Fork housekeeping: backend/.env + frontend/.env were missing after the fork and were recreated (local Mongo, preview URL). The web app's React frontend is not served correctly in this environment (supervisor runs `expo start` against a CRA app) — platform issue, flagged to user.
+- Tests: backend/tests/test_torus_oracle.py 15/15 + testing-agent test_torus_oracle_t1.py 18/18 + backend_test.py 33/33 (iteration 8); UI flows verified on the phone page. Fixed after review: ok:false refusals surfaced as toasts, Refill button disabled while running, open topic rows survive refresh, single poll timer, empty-list save asks first, link contrast + 44 px rows.

@@ -25,6 +25,9 @@
 6 own  0644 web/index.html          H:web/index.html
 7 own  0755 bin/coderd.py           H:bin/coderd.py
 7 keep 0644 etc/coder.conf          H:etc/coder.conf
+7 own  0755 bin/oracled.py          H:bin/oracled.py
+7 keep 0644 etc/pinned.yaml         H:etc/pinned.yaml
+7 keep 0644 etc/oracle.conf         H:etc/oracle.conf
 8 own  0755 bin/torus_seal.py       H:bin/torus_seal.py
 8 own  0755 bin/torus_audit.py      H:bin/torus_audit.py
 8 keep 0644 etc/hardening.conf      H:etc/hardening.conf

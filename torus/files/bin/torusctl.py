@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from torus_common import ETC, LLM_TOGGLE, SEARCH_CONF, VAULT, connect_nats, pack, read_conf, write_conf  # noqa: E402
 
 GW = f"http://127.0.0.1:{os.environ.get('TORUS_PORT', '7777')}"
-CONF = {"llm": LLM_TOGGLE, "search": SEARCH_CONF, "coder": ETC / "coder.conf"}
+CONF = {"llm": LLM_TOGGLE, "search": SEARCH_CONF, "coder": ETC / "coder.conf", "oracle": ETC / "oracle.conf"}
 
 
 def token():
@@ -182,6 +182,39 @@ def cmd_search(a):
         print("no matches in your index")
 
 
+def cmd_oracle(a):
+    if a.action == "check":
+        import oracled
+        topics, err = oracled.load_pinned()
+        if err:
+            sys.exit(f"FAIL {err}")
+        print(f"OK  {len(topics)} topic(s), {sum(len(t['seeds']) for t in topics)} seed(s). Refill now: torus oracle run")
+        return
+    if a.action == "run":
+        r = http("POST", "/api/oracle/run", {"topic": a.topic or ""})
+        if not r.get("ok"):
+            sys.exit("FAIL " + str(r.get("error")))
+        print(f"refill started for {r.get('topics')} topic(s). Watch: torus oracle   or   torus logs oracled -f")
+        return
+    o = http("GET", "/api/oracle")
+    fmt = lambda t: time.strftime("%Y-%m-%d %H:%M", time.localtime(t)) if t else "-"  # noqa: E731
+    if o.get("daemon") == "down":
+        print("! oracled is not running: torus status / torus install 7")
+    print(f"schedule: {'every ' + str(o['every_minutes']) + ' min' if o['enabled'] else 'paused (torus oracle on)'}"
+          f"   last run: {fmt(o['last_run'])}   next: {fmt(o['next_run'])}   runs: {o['runs']}"
+          + (f"\nrunning now: {o['current']}" if o.get("running") else ""))
+    if o.get("error"):
+        print("! " + o["error"])
+    for t in o["topics"]:
+        print(f"\n{t['name']}   {t['ok']}/{len(t['seeds'])} ok   {fmt(t['when'])}" + (f"   digest: {t['digest']}" if t.get("digest") else ""))
+        res = {r["url"]: r for r in t.get("results", [])}
+        for u in t["seeds"]:
+            r = res.get(u, {})
+            print(f"  {r.get('status', '-'):8} {u}" + (f"   {r['error']}" if r.get("error") else ""))
+    if not o["topics"]:
+        print("no pinned topics yet: torus oracle edit")
+
+
 def cmd_ping(a):
     try:
         asyncio.run(asyncio.wait_for(_ping(), 6))
@@ -234,6 +267,10 @@ def main():
     s.add_argument("words", nargs="+")
     s.set_defaults(fn=cmd_search)
     sub.add_parser("ping").set_defaults(fn=cmd_ping)
+    s = sub.add_parser("oracle")
+    s.add_argument("action", choices=["status", "run", "check"])
+    s.add_argument("topic", nargs="?")
+    s.set_defaults(fn=cmd_oracle)
     a = p.parse_args()
     a.fn(a)
 

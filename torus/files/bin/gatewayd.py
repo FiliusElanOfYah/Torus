@@ -48,7 +48,7 @@ MAX_SRC_CHARS = 14_000
 MAX_SOURCES = 10
 MAX_TOTAL_SOURCES = 20
 SERVICES = ["nats-server", "torus-mongo", "fetcherd", "parserd", "indexerd", "vaultd",
-            "summarizerd", "airgapd", "sentineld", "llmd", "gatewayd", "coderd"]
+            "summarizerd", "airgapd", "sentineld", "llmd", "gatewayd", "coderd", "oracled"]
 ACTIVE = {"queued", "searching", "fetching", "needs_you", "thinking"}
 SYSTEM = ("You are TORUS, a careful research assistant running for one person on their phone. "
           "Answer the question using the numbered sources. Cite every factual claim with [n]. "
@@ -511,6 +511,38 @@ async def api_export(method, body, headers):
     return 200, info
 
 
+async def api_oracle(method, path, body):
+    """Pinned topics. Status and the editor read files directly (work even when oracled is down);
+    'run' goes over NATS to the daemon."""
+    try:
+        import oracled
+    except ImportError:
+        return err(503, "phase 7 is not installed: torus install 7")
+    if path == "/api/oracle/run":
+        topic = (body.get("topic") or "").strip()
+        try:
+            return 200, await asyncio.wait_for(nreq("torus.oracle.run", {"topic": topic}, 8), 10)
+        except Exception as e:
+            return err(503, f"oracled did not answer ({e.__class__.__name__}); check: torus status")
+    if path == "/api/oracle/config":
+        if method == "POST":
+            try:
+                topics = await asyncio.to_thread(oracled.save_pinned, body.get("yaml") or "")
+            except Exception as e:
+                return err(400, f"pinned.yaml not saved: {e}")
+            return 200, {"ok": True, "topics": topics, "yaml": oracled.PINNED.read_text(encoding="utf-8")}
+        topics, perr = oracled.load_pinned()
+        text = oracled.PINNED.read_text(encoding="utf-8") if oracled.PINNED.exists() else oracled.dump_pinned([])
+        return 200, {"topics": topics, "yaml": text, "error": perr}
+    if method == "GET" and path == "/api/oracle":
+        try:
+            return 200, await asyncio.wait_for(nreq("torus.oracle.status", {}, 5), 6)
+        except Exception:
+            oracled.load_state()
+            return 200, oracled.status_payload() | {"daemon": "down", "error": "oracled is not answering: torus status"}
+    return err(404, "not found")
+
+
 async def route(method, path, query, body, headers=None):
     if method == "GET" and path in ("/", "/index.html"):
         page = WEB.read_bytes() if WEB.exists() else b"<h1>TORUS</h1><p>web/index.html missing: torus install 6</p>"
@@ -526,6 +558,8 @@ async def route(method, path, query, body, headers=None):
         return await api_audit(method)
     if path == "/api/export":
         return await api_export(method, body, headers)
+    if path.startswith("/api/oracle"):
+        return await api_oracle(method, path, body)
     if method == "GET" and path == "/api/status":
         return 200, {"services": await sv_status(), "settings": settings_payload()}
     if path == "/api/settings":

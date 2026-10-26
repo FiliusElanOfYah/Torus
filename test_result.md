@@ -107,3 +107,9 @@
 # Own tests: /tmp/tv/bin/python -m pytest -p no:cacheprovider -c /dev/null backend/tests/test_torus_phase8_9.py  -> 16/16.
 # Gateway: http://127.0.0.1:7777 (needs X-Torus: 1 header; /api/export POST + /api/code need X-Torus-Token from /tmp/torus-test/etc/gateway.token).
 # Settings tab shows Security audit + Backup cards (data-testid settings-audit, audit-run, audit-item-<id>, settings-export, export-run, export-with-keys).
+# 2026-10-26 main agent: Phase 7 oracled (pinned-topic refill) + Phase 7/8/9 catalog rewrite in backend/phases.py.
+# Local mesh running: TORUS_HOME=/tmp/torus-test, gateway http://127.0.0.1:7777 (X-Torus: 1 header). oracled is in the mesh (torus/tests/run_local_mesh.sh).
+# New API (no token needed): GET /api/oracle (status), POST /api/oracle/run {topic?}, GET/POST /api/oracle/config {yaml}.
+# Vault tab card (data-testid vault-oracle, oracle-summary, oracle-topic-<name>, oracle-run, oracle-run-topic, oracle-edit, oracle-yaml, oracle-save, oracle-cancel).
+# Own tests: /tmp/tv/bin/python -m pytest -n 0 -p no:cacheprovider backend/tests/test_torus_oracle.py -> 15/15; phase8_9 + iter7 suites 31/31 still green.
+# backend/.env + frontend/.env were missing after the fork; recreated (local Mongo). Web-app backend on :8001 serves /api/phases/{7,8,9} with the new catalog.

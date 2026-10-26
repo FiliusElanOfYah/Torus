@@ -1,0 +1,7 @@
+# TORUS pinned topics. oracled re-reads every seed on its schedule (torus oracle status).
+# Edit here or on the web page (Vault tab). One topic = a name and a list of URLs.
+topics:
+  - name: "post-quantum-crypto"
+    seeds:
+      - https://openquantumsafe.org/
+      - https://pq-crystals.org/

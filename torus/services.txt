@@ -13,3 +13,4 @@
 5 llmd         python.run  own
 6 gatewayd     python.run  own
 7 coderd       python.run  own
+7 oracled      python.run  own
