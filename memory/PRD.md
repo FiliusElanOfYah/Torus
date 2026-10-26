@@ -125,6 +125,12 @@ scripts, service unit files, and bootstrap artifacts for every phase (0 → 9).
 ### 2026-10-26 · Unpin from Vault
 - POST /api/oracle/unpin {topic, url?} → removes one seed (url given) or the whole topic; rewrites pinned.yaml; 404 for unknown topic/seed. Vault UI: × on every seed row (oracle-unpin-seed), "Unpin topic" with confirm (oracle-unpin-topic). Digests stay in vault/topics. Tests: test_torus_oracle.py 17/17.
 
+### 2026-10-26 · One-paste installer + GitHub state
+- torus/bootstrap.sh is now the install/build script: clone or update ~/.torus/src (branch-safe fetch refspec, core.fileMode=false, tracked edits copied to ~/.torus/backups/src-edits-<time>, non-git src moved aside), link `torus`, then `torus install all`, `torus status`, Claude instructions. main(){} wrapper + prompts read /dev/tty (or /dev/null) so `curl | bash` cannot be eaten. TORUS_NO_INSTALL=1 = download only. phases/*.sh committed 100755. Root README has the phone steps.
+- GitHub: workspace remote token is invalid → the agent cannot push; GitHub main (e4c5886) has no torus/ folder, raw bootstrap URL 404s until the user runs Emergent "Save to GitHub" (repo FiliusElanOfYah/Torus, branch main). All work is committed locally (HEAD 414c3d8+).
+- Tests: backend/tests/test_torus_bootstrap_iter11.py + iter12.py 23/23 (simulated Termux with file:///app clone).
+- Open user requests paused by the user before this: "Add the Perplexity integration", "Add the Claude AI Models integration" — not started; ask what they want from each before building.
+
 ## Backlog (after 2026-10-26)
 - P1: on the S26 run `torus update && torus install 6 7`, then `torus llm verify` with the real key (the fake list in tests is a stand-in).
 - P2: Mongo use by the daemons, multi-device session roster, amber-high-contrast theme, replace HMAC manifest in the web app with the ML-DSA seal.
