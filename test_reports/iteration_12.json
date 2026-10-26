@@ -1,0 +1,34 @@
+{
+  "summary": "Re-tested the TORUS bootstrap.sh fixes in a simulated Termux layout (temp HOME/PREFIX, TORUS_REPO=file:///app, branch main @ a2a8ca0). Results: iter11 regression suite 14/14 PASS; new suite test_torus_bootstrap_iter12.py 9/9 PASS. (1) After bootstrap the checkout is clean, core.fileMode=false is set, `git pull --ff-only` works, and the phase scripts are executable (100755 in git). A re-run picks up a new upstream commit. (2) Piped `cat bootstrap.sh | bash` under setsid (no controlling tty) with a stdin-reading stand-in torus: the children got /dev/null (got: was empty, not script lines), the Claude block ends the output, exit 0. (3) A non-git ~/.torus/src is moved to backups/src-not-git-*/ and the clone goes ahead. An edited INSTALL.md is listed and copied to backups/src-edits-*/torus/INSTALL.md, then reset to the committed content. A deleted tracked file is restored. (4) `torus help`: the ask --model line includes haiku, and there is a single `llm model` line. `torus status` exits 0 with no service dirs. (5) 'Phases 0-9' is in bootstrap.sh, but README.md line 20 uses an en dash ('Phases 0–9'), so the literal grep from the request does not find it there. GitHub raw URL: 404 (recorded, expected until the user saves to GitHub). Edge issues found: switching TORUS_BRANCH between runs fails (exit 128); paths with spaces in porcelain are split by awk; untracked files are backed up again on every run; `torus restart all` exits 1 when the last service dir is missing.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "torus/bootstrap.sh:45-46", "issue": "Switching branch between runs fails. The clone is `--depth 1 -b BRANCH`, which is single-branch. A later run with another TORUS_BRANCH does `fetch origin other`, which only writes FETCH_HEAD; then `reset --hard origin/other` fails with 'ambiguous argument origin/other' and exit 128 (reproduced). Fix: `git fetch --depth 1 origin \"+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH\"`, or `reset --hard FETCH_HEAD`."},
+      {"endpoint": "torus/bootstrap.sh:39,43", "issue": "`git status --porcelain | awk '{print $2}'` with `for f in $dirty` breaks on paths that contain spaces. Porcelain quotes them, so the list shows `\"torus/my` and `notes.txt\"` and cp silently copies nothing. It also only keeps the old name of a staged rename. No tracked file has a space today, so the risk is low. Use `git status --porcelain -z`, or `git diff --name-only -z` plus `git ls-files -mo --exclude-standard -z`, with a while-read loop."},
+      {"endpoint": "torus/bootstrap.sh:39-44", "issue": "Untracked files (??) count as edits. They are copied to a new src-edits-<time> dir on every run, because reset --hard does not remove them, so backups pile up. Use `--untracked-files=no` for the backup decision, or say that untracked files are left in place."},
+      {"endpoint": "torus/bin/torus:324 (restart all)", "issue": "Same pattern as the old status bug: `for s ...; do [ -d \"$SVDIR/$s\" ] && sv restart \"$s\"; done` exits 1 when the last service dir is missing (reproduced: restart=1). Add `; true` as was done for status."},
+      {"endpoint": "README.md:20", "issue": "The text reads 'Phases 0–9' with an en dash (U+2013). The meaning is right, but `grep 'Phases 0-9' README.md` finds nothing, as the request expected it to. Use an ASCII hyphen if literal grep matters."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": [], "react_native_issues": []},
+  "test_report_links": ["/app/backend/tests/test_torus_bootstrap_iter11.py", "/app/backend/tests/test_torus_bootstrap_iter12.py", "/app/test_reports/pytest/pytest_iter12.xml", "/app/test_reports/pytest/pytest_iter12b.xml"],
+  "action_items": [
+    "bootstrap.sh:45-46: make the update path work when the branch changes. Use fetch with an explicit refspec `+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH`, or `git reset --hard FETCH_HEAD`.",
+    "bootstrap.sh:39-43: build the dirty-file list with NUL separators (porcelain -z) so paths with spaces are kept. Also leave untracked files out of the backup trigger, or back them up only once.",
+    "torus/bin/torus:324: add `; true` after the `restart all` loop, as was done for status.",
+    "Optional: README.md:20 'Phases 0–9' (en dash) -> 'Phases 0-9' (ASCII), so text searches match.",
+    "GitHub: the raw bootstrap URL still returns 404. The user must use Emergent Save to GitHub on branch main."
+  ],
+  "critical_code_review_comments": [
+    "main() wrapper plus IN=/dev/tty or /dev/null works: verified under setsid with no ctty. The stdin-reading children got an empty line, not the script.",
+    "The review request said to put the stand-in torus in $PREFIX/bin. bootstrap re-links $PREFIX/bin/torus with `ln -sfn` to the real CLI, so a stand-in there would be replaced and the real `torus install all` would run. The test puts the stand-in in a stub dir at the front of PATH instead.",
+    "cmd_update (`pull --ff-only` with core.fileMode=false) works on the depth-1 clone when upstream is ahead."
+  ],
+  "updated_files": ["/app/backend/tests/test_torus_bootstrap_iter12.py"],
+  "success_rate": {"backend": "100% (23/23 requested checks pass; 5 minor edge issues found outside the requested scope)", "frontend": "N/A (skipped)"},
+  "seed_data_creation": "none (temp dirs only, removed)",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app && /tmp/tv/bin/python -m pytest -q backend/tests/test_torus_bootstrap_iter11.py backend/tests/test_torus_bootstrap_iter12.py -p no:cacheprovider -n 0. The iter12 piped test uses `setsid -w` so there is no ctty. Do not put a stand-in torus in $PREFIX/bin, because bootstrap overwrites it with a symlink to the real CLI. Never run the real `torus install all` outside Termux.",
+  "rca_of_issue": "Branch switch: `git clone --depth 1 -b X` sets remote.origin.fetch to refs/heads/X only. A plain `git fetch origin Y` therefore never creates refs/remotes/origin/Y, and `reset --hard origin/Y` fails. Repro: clone origin, create branch other, run bootstrap with TORUS_BRANCH=main, then again with TORUS_BRANCH=other -> exit 128."
+}

@@ -1,0 +1,39 @@
+{
+  "summary": "Tested the TORUS one-paste bootstrap installer, README and INSTALL.md in a simulated Termux layout (HOME/PREFIX in tmp, TORUS_REPO=file:///app, branch main @ ee7e632). All requested checks PASS (12/12): bash -n OK; PREFIX=/nonexistent exits 1 with a clear message and writes nothing; download-only run exits 0, ~/.torus/src/torus/bin/torus is executable, $PREFIX/bin/torus symlinks to it, output has 'torus command linked' and 'skipping install'; second run takes the 'updating' path and exits 0; the curl|bash piped form also works; script calls 'torus install all' and 'torus status || true'; Claude block has key set anthropic / llm verify / llm on / seal && audit; README has the exact raw URL, Termux + Termux:Boot F-Droid steps and the torus/INSTALL.md link; INSTALL.md has Steps 1..11 plus the required commands; `torus help` lists all 12 README commands; phases 0-9 exist. GitHub: raw bootstrap URL returns 404. The repo exists, is public, default branch is main, and remote main is at e4c5886, an older ancestor with no torus/ folder. Local main is ahead, so the user only needs to Save to GitHub. Two real bugs found beyond the requested scope (2 extra regression tests, both FAIL): (1) `torus update` breaks after bootstrap. (2) Under curl|bash, anything that reads stdin during `torus install all` eats the rest of the script.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "torus/bootstrap.sh:34 + torus/bin/torus:307 (torus update)", "issue": "bootstrap runs chmod +x on torus/phases/*.sh, but git tracks those files as 100644 and core.fileMode=true. After bootstrap, `git status` in ~/.torus/src shows all 10 phase scripts as modified (mode only). `torus update` runs `git pull --ff-only`, which aborts ('Your local changes ... would be overwritten ... Aborting', exit 1) as soon as an upstream commit touches a phase script. Reproduced with a cloned origin plus one upstream commit to 3-ingest.sh. Re-running bootstrap still works because it uses reset --hard.", "priority": "HIGH"},
+      {"endpoint": "torus/bootstrap.sh (curl | bash form, lines 24 and 45)", "issue": "The script is not wrapped in a function. Under `curl ... | bash`, bash reads the script from stdin line by line, and child processes share that stdin. If anything in `pkg install -y git` or `torus install all` reads stdin (apt/dpkg conffile prompts, the pkg mirror prompt, or a pip/python prompt), it swallows the remaining script text. Then `torus status` and the whole Claude instructions block silently never print. A stub `torus` that reads stdin reproduced this: output stops after 'STUB install all' and the exit code is still 0. It is worse if consumed text is taken as a prompt answer.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "torus/bootstrap.sh:26-33", "issue": "If ~/.torus/src exists but is not a git checkout (e.g. a manual copy from earlier setups), the script dies with a raw git error 'destination path ... already exists and is not an empty directory' (exit 128) and gives no hint (e.g. move it to ~/.torus/src.old)."},
+      {"endpoint": "torus/bootstrap.sh:29", "issue": "`git reset --hard origin/$BRANCH` silently throws away the user's edits in ~/.torus/src. INSTALL.md 'Changing code yourself (Acode)' tells users to edit exactly ~/.torus/src/torus/files/..., and README says 'Run it again any time'. Verified: a local edit to INSTALL.md was wiped with no warning and no backup. `torus update` uses pull --ff-only instead, so the two behave inconsistently."},
+      {"endpoint": "torus/bootstrap.sh:8,44 + README.md:20", "issue": "The text says 'Phases 1-9', but `torus install all` runs PHASES='0 1 2 3 4 5 6 7 8 9' (INSTALL.md Step 4 correctly says 0 to 9)."},
+      {"endpoint": "torus/bin/torus usage (lines 35, 60-63)", "issue": "`torus llm model <tier>` and `torus llm model sonnet|opus` are both listed, which is redundant. `torus ask ... --model sonnet|opus` and `torus llm id sonnet|opus` leave out haiku, which is supported."},
+      {"endpoint": "torus status (bin/torus:321)", "issue": "Exit code is 1 when the last service (oracled) has no sv dir, because the for-loop ends on `[ -d ] && ...`. Bootstrap masks it with || true, but scripts that run `torus status` see a false failure."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": [], "react_native_issues": []},
+  "test_report_links": ["/app/backend/tests/test_torus_bootstrap_iter11.py", "/app/test_reports/pytest/pytest_iter11.xml"],
+  "action_items": [
+    "Fix the mode drift. Mark the phase scripts executable in git (`git update-index --chmod=+x torus/phases/*.sh`, then commit), and/or drop phases from the chmod on bootstrap.sh:34 (they are sourced with `.`, so they do not need +x), and/or run `git -C \"$SRC\" config core.fileMode false` in bootstrap. Optionally make cmd_update use fetch plus a safe reset like bootstrap. Re-run TestRegressions::test_torus_update_pull_after_bootstrap.",
+    "Make bootstrap.sh safe to pipe. Wrap the whole body in `main() { ... }; main \"$@\"` so bash parses all of it before running anything, and give stdin-reading children a terminal (`torus install all </dev/tty` when it exists, else </dev/null; same for `pkg install -y git`). Re-run TestRegressions::test_piped_install_does_not_eat_rest_of_script.",
+    "Before `git reset --hard`, check `git -C $SRC status --porcelain`. If there are local edits, back them up (git stash, or a copy to ~/.torus/backups/<stamp>/src) and say so, or refuse and point to `torus update`.",
+    "Handle a non-git ~/.torus/src: move it to ~/.torus/src.old-<stamp> with a message, then clone.",
+    "Change 'Phases 1-9' to 'Phases 0-9' in bootstrap.sh (lines 8, 44) and README.md line 20; tidy the llm/ask usage lines to include haiku.",
+    "GitHub: tell the user that remote main is still at e4c5886 (no torus/ folder), so the raw bootstrap URL is 404 until they use Save to GitHub on branch main."
+  ],
+  "critical_code_review_comments": [
+    "bootstrap.sh: TORUS_REPO/TORUS_BRANCH overrides and the PREFIX guard are good. set -eu is fine here, but there is no trap/hint telling the user what failed when git fetch or clone fails (e.g. no network).",
+    "bootstrap.sh relies on `torus` being on PATH via $PREFIX/bin. That is true in Termux; calling \"$PREFIX/bin/torus\" or \"$SRC/torus/bin/torus\" directly would be more robust.",
+    "Shallow clone (--depth 1) plus `git pull --ff-only` in `torus update` works, but each pull deepens history. Fine, just noting it."
+  ],
+  "updated_files": ["/app/backend/tests/test_torus_bootstrap_iter11.py"],
+  "success_rate": {"backend": "100% of requested checks (12/12); 2 additional regression tests FAIL (real bugs)", "frontend": "N/A (skipped as requested)"},
+  "seed_data_creation": "None. All runs used mktemp/pytest tmp dirs and cleaned up after themselves.",
+  "github_state": {"raw_bootstrap_url_http_code": 404, "repo_http_code": 200, "remote_main_head": "e4c5886 (ancestor of local ee7e632, no torus/ folder)"},
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run: cd /app && python -m pytest backend/tests/test_torus_bootstrap_iter11.py -q (pytest.ini uses xdist). TestRegressions must pass after the fixes. Do not run `torus install all` outside Termux.",
+  "rca_of_issue": "(1) Mode drift: git index has phases at 100644 and bootstrap chmod +x makes them 100755 on disk. With core.fileMode=true that counts as a local change, so `git pull` refuses to overwrite it. (2) Pipe consumption: `curl | bash` runs bash with the script on stdin and no function wrapper, so bash executes line by line while inherited stdin still holds the unread script. Any child that reads stdin consumes it."
+}
