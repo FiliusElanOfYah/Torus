@@ -17,7 +17,7 @@ Claude as an opt-in, sealed top layer. Two parts live in this repo:
    pkg update -y && pkg install -y curl
    curl -fsSL https://raw.githubusercontent.com/FiliusElanOfYah/Torus/main/torus/bootstrap.sh | bash
    ```
-   That one line downloads TORUS, installs Phases 0–9 and prints the status. Run it again any
+   That one line downloads TORUS, installs Phases 0-9 and prints the status. Run it again any
    time to update or repair.
 3. Connect Claude with your own key:
    ```

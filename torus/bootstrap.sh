@@ -35,14 +35,13 @@ main() {
   if [ -d "$SRC/.git" ]; then
     say "updating $SRC"
     git -C "$SRC" config core.fileMode false
-    local dirty
-    dirty="$(git -C "$SRC" status --porcelain 2>/dev/null | awk '{print $2}')"
-    if [ -n "$dirty" ]; then
-      local keep="$HOME/.torus/backups/src-edits-$(date +%Y%m%d-%H%M%S)"
-      echo "you edited files in $SRC; copies are kept in $keep before the update:"
-      for f in $dirty; do echo "   $f"; mkdir -p "$keep/$(dirname "$f")"; cp -a "$SRC/$f" "$keep/$f" 2>/dev/null || true; done
-    fi
-    git -C "$SRC" fetch --depth 1 origin "$BRANCH"
+    # tracked files you edited are kept (untracked files are left in place and ignored)
+    local keep="" f
+    while IFS= read -r -d '' f; do
+      [ -n "$keep" ] || { keep="$HOME/.torus/backups/src-edits-$(date +%Y%m%d-%H%M%S)"; echo "you edited files in $SRC; copies are kept in $keep before the update:"; }
+      echo "   $f"; mkdir -p "$keep/$(dirname "$f")"; cp -a "$SRC/$f" "$keep/$f" 2>/dev/null || true
+    done < <(git -C "$SRC" status --porcelain -z --untracked-files=no 2>/dev/null | awk 'BEGIN{RS="\0"; ORS="\0"} {print substr($0, 4)}')
+    git -C "$SRC" fetch --depth 1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
     git -C "$SRC" reset --hard "origin/$BRANCH"
   else
     say "downloading TORUS into $SRC"
