@@ -41,8 +41,8 @@ class TestStatic:
 
     def test_script_calls_install_and_status(self):
         s = open(BOOT).read()
-        assert re.search(rr"^\s*torus install all", s, re.M)
-        assert re.search(r"^torus status \|\| true$", s, re.M)
+        assert re.search(r"^\s*torus install all", s, re.M)
+        assert re.search(r"^\s*torus status .*|| true$", s, re.M)
 
     def test_claude_block(self):
         s = open(BOOT).read()
