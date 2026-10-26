@@ -32,7 +32,7 @@ torus: your local research assistant
 
  USE IT
   torus open [job]           open the web page in Brave (127.0.0.1:7777)
-  torus ask "question" [url ...] [--mode urls|brave|both] [--model sonnet|opus] [--fresh]
+  torus ask "question" [url ...] [--mode urls|brave|both] [--model sonnet|opus|haiku] [--fresh]
   torus job [id]             list jobs or show one
   torus follow <id> "question" [url ...] [--model opus]   follow-up in the same job (reuses its sources)
   torus report <id>          save the job as a PDF in Downloads/vault/reports
@@ -59,8 +59,7 @@ torus: your local research assistant
   torus llm verify           check the 3 model ids (sonnet/opus/haiku) against Anthropic and fix stale ones
   torus llm model <tier>     default tier: sonnet (answers), opus (code), haiku (fast and cheap)
   torus llm auto on|off      auto-route: short follow-ups (no new URLs) go to Haiku, full answers keep the default
-  torus llm model sonnet|opus      default model
-  torus llm id sonnet|opus <id>    exact Anthropic model id
+  torus llm id <tier> <id>   pin an exact Anthropic model id for sonnet, opus or haiku
   torus search mode urls|brave|both  |  torus search count 1-10
 
  HARDENING AND BACKUP (phases 8 and 9)
@@ -304,7 +303,7 @@ cmd_backups() {
 cmd_update() {
   [ -d "$TORUS_SRC/.git" ] || die "source is not a git checkout. Re-run the bootstrap line"
   say "pulling TORUS from GitHub"
-  git -C "$TORUS_SRC" pull --ff-only || die "pull failed. If you edited files in ~/.torus/src, see: git -C ~/.torus/src status"
+  git -C "$TORUS_SRC" -c core.fileMode=false pull --ff-only || die "pull failed. If you edited files in ~/.torus/src, see: git -C ~/.torus/src status"
   ok "now at $(git -C "$TORUS_SRC" log -1 --format='%h %s')"
   exec "$TREE/bin/torus" install all
 }
@@ -318,7 +317,7 @@ case "$cmd" in
   files) cmd_files ;;
   backups) cmd_backups ;;
   rollback) cmd_rollback "$@" ;;
-  status) for s in $ALL_SERVICES; do [ -d "$SVDIR/$s" ] && sv status "$s"; done ;;
+  status) for s in $ALL_SERVICES; do [ -d "$SVDIR/$s" ] && sv status "$s"; done; true ;;
   logs) cmd_logs "$@" ;;
   restart)
     [ -n "${1:-}" ] || die "usage: torus restart <service|all>"
