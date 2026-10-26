@@ -13,7 +13,7 @@ import secrets
 import time
 import traceback
 
-from torus_common import VAR, atomic_write, key_present, llm_settings, log
+from torus_common import MODEL_ALIASES, VAR, atomic_write, key_present, llm_settings, log
 
 DIR = VAR / "code"
 TASKS, EVENTS, RUNNING = {}, {}, {}
@@ -305,8 +305,8 @@ async def new_task(body):
     if not project or not instruction:
         return err(400, "project and instruction are required")
     model = body.get("model") or None
-    if model and model not in ("sonnet", "opus"):
-        return err(400, "model must be sonnet or opus")
+    if model and model not in MODEL_ALIASES:
+        return err(400, "model must be sonnet, opus or haiku")
     try:
         max_attempts = max(1, min(5, int(body.get("max_attempts") or 3)))
         timeout = max(5, min(1800, int(body.get("timeout") or 120)))

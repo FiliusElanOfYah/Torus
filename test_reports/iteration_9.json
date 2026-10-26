@@ -1,0 +1,50 @@
+{
+  "summary": "Tested the four new TORUS features end-to-end on the running mesh (gatewayd 127.0.0.1:7777, fake Claude). Backend: new suite test_torus_iter9_t1.py has 20/20 passing. Regression suites test_torus_models_docs, test_torus_oracle_t1, test_torus_iter7_export_audit and backend_test.py have 85/85 passing. Covered: settings tiers and haiku_id; model haiku gives 200 and gpt gives 400; haiku_id gpt-4 gives 400; the 4-5 id gives 200 with status 'outdated'; verify fix:false finds opus missing and haiku outdated and writes nothing; fix:true changes opus to 5-5 and haiku to 5-5 and updates the file; GET verify returns the report with when>0; /api/llm/models lists 6 models with {id, display_name, created_at}; docs list for all 3 folders (counts, newest first, summaries hidden, has_summary); dir=other gives 400; doc read strips frontmatter, text starts with '# ', and inbox docs include summary; all 5 path-safety cases plus '' and a missing file give 404; health audit_fail=1 matches audit.json; an oracle second run gives changed=0 and 16-char hashes; GET /api/phases on :8001 returns 200. UI at 390x844, all requested flows pass: audit-badge '1'; the three tiers; haiku 'newer available', then Verify shows the toast 'Fixed: haiku → claude-haiku-5-5' and the tier becomes 'current'; choosing a dropdown option updates the id and shows a toast; the Haiku default segment saves; the ask-model-select haiku option; job-rerun-haiku; the Dossiers toggle with counts; doc navigation to title/meta/body; doc-back keeps the folder; [2] highlights li#src-2.hit; a missing [5] shows a toast; the inbox doc shows doc-summary and doc-job-link; the digest shows h1/h2, bullets and links; the oracle pill '1 new' appears, expanding clears it and sets localStorage, it stays hidden after reload, and the digest link opens. No JS page errors. Found a few minor backend validation issues and UI contrast/overflow issues (below).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/settings", "issue": "Partial write. {model:'opus', haiku_id:'gpt'} returns 400, but model=opus was already written to llm.toggle. The keys are written in order and the error stops halfway (gatewayd.py:474-486). Validate every field first, then write."},
+      {"endpoint": "POST /api/settings {<tier>_id}", "issue": "A model from another family is accepted. {haiku_id:'claude-opus-5-5'} gives 200, the haiku tier then points at an Opus model, and its status shows as 'outdated'. set_tier_id (torus_models.py:83-89) only checks the regex. Add: family(model_id) == tier, else 400."},
+      {"endpoint": "GET /api/vault/docs", "issue": "The counts include dotfiles but the list skips them. With inbox/.h.md present, counts.inbox=13 but 12 rows are shown (gatewayd.py:617 uses glob('*.md'), list_docs filters names starting with '.')."},
+      {"endpoint": "POST /api/llm/verify", "issue": "'fix' is not checked to be a boolean. {fix:'no'} is truthy and rewrites llm.toggle. Use body.get('fix') is True, or validate it."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Doc reader meta line", "issue": "The 'open job …' link uses the browser default color rgb(0,0,238) on the card background rgb(19,23,21), which is almost invisible (about 2:1 contrast). The URL link next to it has color:var(--blue) set inline, but the job link does not (index.html:425). Better: add a global 'a{color:var(--blue)}' rule. The same default-link problem was reported in iteration 8.", "testID": "doc-job-link", "priority": "MEDIUM"},
+      {"component": "Doc reader body", "issue": "Long unbroken URLs in the Sources list overflow the card. On the answers doc, document scrollWidth is 429px on a 390px viewport, so the page scrolls sideways. Add overflow-wrap:anywhere (or word-break) to .answer a / li.", "testID": "doc-body", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Doc reader", "issues": [
+        "The '## Sources' list is numbered '1. 2. 3.' in the markdown, but md() renders every list as <ul> bullets, so the numbers that [n] points to are not shown. Render <ol> for numbered lines.",
+        "Bracket numbers already in the extracted page text (Wikipedia footnotes such as 'subset.[5]' or 'lines.[23]') become citation links, and tapping them gives 'Source 5 is not listed'. Consider linking only when n <= the number of sources.",
+        "Citation links are about 18x16px, well below the 44px touch target. Add padding or a larger hit area.",
+        "Doc rows show '0 KB' for files under 512 bytes ((bytes/1024).toFixed(0)). Show bytes or '<1 KB'."
+      ]},
+      {"screen": "Vault tab", "issues": ["Dossiers shows up to 40 rows in the card, which pushes the Pinned topics card far down the page. Consider showing about 10 rows plus a 'show more' link."]},
+      {"screen": "Settings > Claude model ids", "issues": ["The width of the per-tier 'change…' select changes with the length of the role text, so the three selects do not line up.", "After 'Verify model ids' fixes the tier that is the current default, 'Model id in use' (settings-model-id) keeps the old id until you reload, because viewSettings is not re-rendered."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_torus_iter9_t1.py", "/app/backend/tests/manual_oracle_badge_prep.py", "/app/test_reports/pytest/pytest_iter9_t1.xml"],
+  "action_items": [
+    "gatewayd api_settings: validate all fields before writing anything, so a 400 never leaves a partial change behind.",
+    "torus_models.set_tier_id: reject an id whose family() is not the tier (for example haiku_id=claude-opus-5-5).",
+    "gatewayd api_vault_docs: exclude dotfiles from counts so they match list_docs.",
+    "api_llm verify: treat fix as a strict boolean.",
+    "web/index.html: add a global theme color for links (doc-job-link is unreadable), add overflow-wrap for long URLs in .answer, render numbered lists as <ol>, and enlarge the hit area of citation links."
+  ],
+  "critical_code_review_comments": [
+    "oracled marks every seed as changed on the first run (an empty previous hash differs from the new one), so a newly pinned topic always shows 'N new' right away. This may be intended, but it is worth stating in the UI or skipping when there is no previous hash.",
+    "The pill compares server changed_at with client Date.now(). That is fine on the phone, where both run on the same device, but it breaks if the page is opened from another device with clock skew.",
+    "md() is regex-based. It escapes HTML first (esc), so I did not find an XSS route through doc text. URLs are limited to https?:.",
+    "The Code tab is locked without the token, so code-model-select (the haiku option) was checked only by code review (index.html:278), not in the UI."
+  ],
+  "updated_files": ["/app/backend/tests/test_torus_iter9_t1.py (new)", "/app/backend/tests/manual_oracle_badge_prep.py (new helper)"],
+  "success_rate": {"backend": "100% (20/20 new, 85/85 regression)", "frontend": "100% of the requested flows pass; 2 medium UI issues (link contrast, URL overflow)"},
+  "seed_data_creation": "Temporarily changed llm.toggle and pinned.yaml, and restored both: llm.toggle has model=sonnet, opus_id=claude-opus-5-5, haiku_id=claude-haiku-5-5, and pinned.yaml has the original example topic with 2 seeds. Left behind: vault/topics/tmpreset.md (a digest from the state-reset run). var/models.json now holds a fresh report with every tier ok.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "To reset the oracle state, pin a different topic and run once (the state of unpinned topics is dropped), then pin 'example' again. manual_oracle_badge_prep.py prep|restore does this (restore reads /tmp/pinned.orig.yaml). The Playwright headless shell sometimes SIGSEGVs at launch; just retry. Run: python3 -m pytest -n 0 -p no:cacheprovider /app/backend/tests/test_torus_iter9_t1.py"
+}

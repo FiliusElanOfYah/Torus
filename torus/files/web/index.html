@@ -16,6 +16,10 @@ header{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--
 nav{display:flex;gap:4px;margin-top:10px;overflow-x:auto}
 nav a{flex-shrink:0;padding:10px 14px;font:600 13px var(--mono);color:var(--dim);text-decoration:none;border-bottom:2px solid transparent;text-transform:uppercase;letter-spacing:.08em}
 nav a.on{color:var(--amber);border-color:var(--amber)}
+nav a{position:relative}.badge{display:none;position:absolute;top:4px;right:2px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--amber);color:#111;font:700 10px/16px var(--mono);text-align:center;letter-spacing:0}.badge.on{display:inline-block}
+.pill.new{color:#111;background:var(--amber);border-color:var(--amber);font-size:11px;padding:1px 8px}
+.doc{display:block;padding:10px 0;border-bottom:1px solid var(--line);color:var(--text);text-decoration:none}.doc small{display:block;color:var(--dim);font:12px var(--mono);margin-top:2px}
+.answer li.hit{background:#2a2410;border-radius:4px}
 main{padding:16px;max-width:860px;margin:0 auto;padding-bottom:calc(env(safe-area-inset-bottom) + 32px)}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
 label{display:block;font:600 12px var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:12px 0 6px}
@@ -39,7 +43,8 @@ button:active{transform:scale(.98)}button:disabled{opacity:.5}
 .answer h1,.answer h2,.answer h3{font-size:17px;color:var(--amber);margin:16px 0 6px}
 .answer pre{background:#0e1211;border:1px solid var(--line);padding:12px;border-radius:8px;overflow-x:auto;font:13px var(--mono)}
 .answer code{font:13px var(--mono);background:#0e1211;padding:1px 4px;border-radius:4px}
-.answer a{color:var(--blue)}.cite{font:600 12px var(--mono);color:var(--amber);text-decoration:none}
+.answer a{color:var(--blue);word-break:break-all}.answer{overflow-wrap:anywhere}.answer ol{padding-left:22px}main a{color:var(--blue)}
+.cite{display:inline-block;font:600 12px var(--mono);color:var(--amber);text-decoration:none;padding:6px 5px;margin:-6px -2px}
 .log{font:12px var(--mono);color:var(--dim);white-space:pre-wrap;max-height:180px;overflow:auto}
 .svc{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);font:13px var(--mono)}
 .hint{color:var(--dim);font-size:14px}code.k{font:13px var(--mono);color:var(--amber)}
@@ -60,7 +65,7 @@ button:active{transform:scale(.98)}button:disabled{opacity:.5}
     <a href="#/jobs" data-tab="jobs" data-testid="nav-jobs">Jobs</a>
     <a href="#/code" data-tab="code" data-testid="nav-code">Code</a>
     <a href="#/vault" data-tab="vault" data-testid="nav-vault">Vault</a>
-    <a href="#/settings" data-tab="settings" data-testid="nav-settings">Settings</a>
+    <a href="#/settings" data-tab="settings" data-testid="nav-settings">Settings<span class="badge" id="audit-badge" data-testid="audit-badge" title="audit failures"></span></a>
   </nav>
 </header>
 <main id="view"></main>
@@ -90,18 +95,21 @@ function md(src) {
   const blocks = []; let s = esc(src).replace(/```[a-z]*\n([\s\S]*?)```/g, (_, c) => { blocks.push(c); return "\u0000" + (blocks.length - 1) + "\u0000"; });
   const inline = t => t.replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
     .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/(^|[\s(;])(https?:\/\/[^\s<)&]+(?:&amp;[^\s<)&]+)*)/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>')
+    .replace(/(^|\s)_([^_\n]+)_(?=[\s.,;:]|$)/g, '$1<i>$2</i>')
     .replace(/\[(\d{1,2})\]/g, '<a class="cite" href="#" data-cite="$1">[$1]</a>');
   return s.split(/\n{2,}/).map(b => {
     if (/^\u0000\d+\u0000$/.test(b.trim())) return "<pre>" + blocks[+b.trim().slice(1, -1)] + "</pre>";
     const h = b.match(/^(#{1,3})\s+(.*)/); if (h) return `<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`;
-    const lines = b.split("\n");
-    if (lines.every(l => /^\s*([-*]|\d+\.)\s+/.test(l))) return "<ul>" + lines.map(l => "<li>" + inline(l.replace(/^\s*([-*]|\d+\.)\s+/, "")) + "</li>").join("") + "</ul>";
+    const lines = b.trim().split("\n");
+    if (lines.every(l => /^\s*([-*]|\d+\.)\s+/.test(l))) { const tag = /^\s*\d+\./.test(lines[0]) ? "ol" : "ul"; return `<${tag}>` + lines.map(l => "<li>" + inline(l.replace(/^\s*([-*]|\d+\.)\s+/, "")) + "</li>").join("") + `</${tag}>`; }
     return "<p>" + inline(b).replace(/\n/g, "<br>") + "</p>";
   }).join("").replace(/\u0000(\d+)\u0000/g, (_, i) => "<pre>" + blocks[+i] + "</pre>");
 }
 
 async function health() {
-  try { const h = await api("/api/health"); $("#mesh-dot").classList.toggle("on", h.nats); $("#mesh-meta").textContent = (h.nats ? "mesh online" : "mesh offline") + " | " + h.running + " running"; }
+  try { const h = await api("/api/health"); $("#mesh-dot").classList.toggle("on", h.nats); $("#mesh-meta").textContent = (h.nats ? "mesh online" : "mesh offline") + " | " + h.running + " running";
+    const b = $("#audit-badge"); b.textContent = h.audit_fail || ""; b.classList.toggle("on", !!h.audit_fail); }
   catch { $("#mesh-dot").classList.remove("on"); $("#mesh-meta").textContent = "gateway offline"; }
 }
 
@@ -121,7 +129,7 @@ async function viewAsk() {
     ${(askMode !== "urls" && !settings.keys.brave) ? `<p class="warn" data-testid="ask-brave-key-warning">No Brave key yet. Run <code class="k">torus key set brave</code> in Termux.</p>` : ""}
     <label for="model">Model</label>
     <select id="model" data-testid="ask-model-select">
-      <option value="">Default (${esc(settings.model)})</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option>
+      <option value="">Default (${esc(settings.model)})</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option><option value="haiku">Haiku (fast)</option>
     </select>
     <p class="hint" data-testid="ask-llm-state">LLM is <b>${settings.llm_enabled ? "ON" : "OFF"}</b>${settings.llm_enabled && !settings.keys.anthropic ? " but no key is stored" : ""}. When off, TORUS writes a local summary instead.</p>
     <div class="row"><label style="margin:0;display:flex;gap:8px;align-items:center;text-transform:none"><input type="checkbox" id="fresh" data-testid="ask-fresh-checkbox"> Ignore cache</label></div>
@@ -185,7 +193,7 @@ async function viewJob(id) {
      <label for="fu-urls">Extra URLs (optional, one per line)</label>
      <textarea id="fu-urls" class="mono" data-testid="followup-urls-input" placeholder="https://..."></textarea>
      <div class="row" style="margin-top:10px"><select id="fu-model" data-testid="followup-model-select" style="width:auto">
-       <option value="">Default model</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option></select>
+       <option value="">Default model</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option><option value="haiku">Haiku (fast)</option></select>
        <button class="primary" data-act="follow" data-testid="followup-submit-button">Ask follow-up</button></div></div>
    <div class="card"><div class="row">
      <button data-act="cites" data-testid="citation-map-button">Citation map</button>
@@ -201,7 +209,7 @@ async function viewJob(id) {
       ${s.preview ? `<details><summary>preview</summary>${esc(s.preview)}</details>` : ""}</div>`).join("") : `<p class="hint">No sources yet.</p>`}
   </div>
   <div class="card"><div class="row">
-    ${done ? `<button data-act="rerun" data-model="sonnet" data-testid="job-rerun-sonnet">Re-answer with Sonnet</button><button data-act="rerun" data-model="opus" data-testid="job-rerun-opus">Re-answer with Opus</button>`
+    ${done ? `<button data-act="rerun" data-model="sonnet" data-testid="job-rerun-sonnet">Re-answer with Sonnet</button><button data-act="rerun" data-model="opus" data-testid="job-rerun-opus">Re-answer with Opus</button><button data-act="rerun" data-model="haiku" data-testid="job-rerun-haiku">Re-answer with Haiku</button>`
            : `<button class="danger" data-act="cancel" data-testid="job-cancel-button">Cancel</button>`}
   </div><label>Log</label><div class="log" data-testid="job-log">${esc(j.log.join("\n"))}</div></div>`;
   $("#view").onclick = async e => {
@@ -268,7 +276,7 @@ async function viewCode() {
     <input type="text" id="c-focus" data-testid="code-focus-input" placeholder="main.py, utils/io.py">
     <div class="row" style="margin-top:10px">
       <select id="c-att" data-testid="code-attempts-select" style="width:auto">${[1,2,3,4,5].map(n => `<option value="${n}" ${n===3?"selected":""}>${n} attempt${n>1?"s":""}</option>`).join("")}</select>
-      <select id="c-model" data-testid="code-model-select" style="width:auto"><option value="">Default model</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option></select>
+      <select id="c-model" data-testid="code-model-select" style="width:auto"><option value="">Default model</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option><option value="haiku">Haiku (fast)</option></select>
     </div>
     <label style="display:flex;gap:8px;align-items:center;text-transform:none"><input type="checkbox" id="c-auto" data-testid="code-autofix-checkbox"> Apply fixes without asking (after you approve the first change)</label>
     <div class="row" style="margin-top:12px"><button class="primary" data-act="task" data-testid="code-task-submit-button">Start task</button></div></div>
@@ -336,6 +344,9 @@ async function viewVault() {
   $("#view").innerHTML = `<div class="card"><label style="margin-top:0" for="vq">Search your index</label>
     <div class="row"><input type="text" id="vq" data-testid="vault-search-input" placeholder="words..." style="flex:1"><button class="primary" id="vgo" data-testid="vault-search-button">Search</button></div></div>
     <div id="vres" data-testid="vault-results"></div>
+    <div class="card" data-testid="vault-docs"><label style="margin-top:0">Dossiers</label>
+      <div class="seg" id="doc-seg" data-testid="docs-folder-toggle">${["answers","inbox","topics"].map(d=>`<button data-dir="${d}" class="${d===docDir?"on":""}" data-testid="docs-folder-${d}">${d==="inbox"?"Pages read":d[0].toUpperCase()+d.slice(1)}</button>`).join("")}</div>
+      <div id="docs-body" data-testid="docs-list"><p class="hint">loading…</p></div></div>
     <div class="card" data-testid="vault-oracle"><label style="margin-top:0">Pinned topics (oracled)</label>
       <div id="oracle-body"><p class="hint">loading…</p></div>
       <div class="row"><button id="oracle-run" data-testid="oracle-run">Refill all now</button><button id="oracle-edit" data-testid="oracle-edit">Edit topics</button></div>
@@ -349,6 +360,9 @@ async function viewVault() {
     } catch (e) { toast(e.message); }
   };
   $("#vgo").onclick = go; $("#vq").onkeydown = e => { if (e.key === "Enter") go(); };
+  renderDocs();
+  $("#doc-seg").onclick = e => { const b = e.target.closest("button[data-dir]"); if (!b) return; docDir = b.dataset.dir; localStorage.setItem("torus_doc_dir", docDir);
+    $("#doc-seg").querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); renderDocs(); };
   renderOracle();
   const startRefill = async (body, okMsg, btn) => {
     btn.disabled = true;
@@ -383,12 +397,49 @@ async function renderOracle() {
   const open = new Set([...el.querySelectorAll("details[open]")].map(d => d.dataset.topic));
   const sched = o.enabled ? `every ${o.every_minutes} min · next ${o.next_run ? new Date(o.next_run * 1000).toLocaleTimeString() : "soon"}` : "schedule paused (torus oracle on)";
   el.innerHTML = `<p class="hint" data-testid="oracle-summary">${o.daemon === "down" ? `<b class="s-error">oracled is down</b> · ` : ""}${o.running ? `<b class="s-ok">refilling…</b> ${esc(o.current)} · ` : ""}${esc(sched)}${o.last_run ? ` · last run ${esc(when(o.last_run))}` : ""}${o.error ? `<br><span class="s-error">${esc(o.error)}</span>` : ""}</p>` +
-    (o.topics.length ? o.topics.map(t => `<details class="svc" style="display:block" data-topic="${esc(t.name)}" data-testid="oracle-topic-${esc(t.name)}" ${open.has(t.name) ? "open" : ""}><summary style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;list-style:none;gap:8px;min-height:44px"><span><b>${esc(t.name)}</b> <span class="hint">${t.seeds.length} seed${t.seeds.length===1?"":"s"}</span></span><span style="white-space:nowrap">${t.when ? `<span class="${t.fail?"s-needs_you":"s-ok"}">${t.ok}/${t.seeds.length} ok</span> · ${esc(new Date(t.when*1000).toLocaleString())}` : '<span class="hint">not refilled yet</span>'}</span></summary>
-      ${t.seeds.map(u => { const r = (t.results || []).find(x => x.url === u) || {}; return `<div class="hint" style="margin:4px 0 0;display:flex;gap:8px;justify-content:space-between;align-items:center;min-height:32px"><a href="${esc(u)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.title || u)}</a><span class="${oracleCls[r.status] || "hint"}" style="white-space:nowrap">${r.status ? esc(r.status) + (r.error ? ": " + esc(r.error) : "") : "–"}</span></div>`; }).join("")}
-      <div class="row" style="margin-top:8px"><button data-topic="${esc(t.name)}" data-testid="oracle-run-topic" ${o.running?"disabled":""}>Refill this topic</button>${t.digest ? `<span class="hint" style="align-self:center">digest: <code class="k">${esc(t.digest.split("/").slice(-2).join("/"))}</code></span>` : ""}</div></details>`).join("")
+    (o.topics.length ? o.topics.map(t => `<details class="svc" style="display:block" data-topic="${esc(t.name)}" data-testid="oracle-topic-${esc(t.name)}" ${open.has(t.name) ? "open" : ""}><summary style="display:flex;justify-content:space-between;align-items:center;cursor:pointer;list-style:none;gap:8px;min-height:44px"><span><b>${esc(t.name)}</b> <span class="hint">${t.seeds.length} seed${t.seeds.length===1?"":"s"}</span>${t.changed && t.changed_at > (oracleSeen[t.name] || 0) ? ` <span class="pill new" data-testid="oracle-new-${esc(t.name)}">${t.changed} new</span>` : ""}</span><span style="white-space:nowrap">${t.when ? `<span class="${t.fail?"s-needs_you":"s-ok"}">${t.ok}/${t.seeds.length} ok</span> · ${esc(new Date(t.when*1000).toLocaleString())}` : '<span class="hint">not refilled yet</span>'}</span></summary>
+      ${t.seeds.map(u => { const r = (t.results || []).find(x => x.url === u) || {}; return `<div class="hint" style="margin:4px 0 0;display:flex;gap:8px;justify-content:space-between;align-items:center;min-height:32px"><a href="${esc(u)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.title || u)}</a><span class="${oracleCls[r.status] || "hint"}" style="white-space:nowrap">${r.changed ? '<span class="s-needs_you">changed · </span>' : ""}${r.status ? esc(r.status) + (r.error ? ": " + esc(r.error) : "") : "–"}</span></div>`; }).join("")}
+      <div class="row" style="margin-top:8px"><button data-topic="${esc(t.name)}" data-testid="oracle-run-topic" ${o.running?"disabled":""}>Refill this topic</button>${t.digest ? `<a class="btnlink" href="#/doc/${encodeURIComponent("topics/" + t.digest.split("/").pop())}" data-testid="oracle-digest-link">Read digest</a>` : ""}</div></details>`).join("")
     : `<p class="hint" data-testid="oracle-empty">No pinned topics yet. Tap “Edit topics”.</p>`);
   const runBtn = $("#oracle-run"); if (runBtn) runBtn.disabled = !!o.running;
+  el.querySelectorAll("details[data-topic]").forEach(d => d.addEventListener("toggle", () => { if (!d.open) return;
+    oracleSeen[d.dataset.topic] = Date.now() / 1000; localStorage.setItem("torus_oracle_seen", JSON.stringify(oracleSeen));
+    const pill = d.querySelector(".pill.new"); if (pill) pill.remove(); }));
   if (o.running) oracleTimer = setTimeout(renderOracle, 3000);
+}
+let oracleSeen = {}; try { oracleSeen = JSON.parse(localStorage.getItem("torus_oracle_seen") || "{}"); } catch { oracleSeen = {}; }
+let docDir = localStorage.getItem("torus_doc_dir") || "answers";
+
+async function renderDocs() {
+  const el = $("#docs-body"); if (!el) return;
+  try {
+    const r = await api("/api/vault/docs?dir=" + encodeURIComponent(docDir));
+    $("#doc-seg").querySelectorAll("button").forEach(b => { const n = r.counts[b.dataset.dir]; b.textContent = (b.dataset.dir === "inbox" ? "Pages read" : b.dataset.dir[0].toUpperCase() + b.dataset.dir.slice(1)) + (n ? ` (${n})` : ""); });
+    el.innerHTML = r.docs.length ? r.docs.slice(0, 40).map(d => `<a class="doc" href="#/doc/${encodeURIComponent(d.rel)}" data-testid="doc-row"><span>${esc(d.title)}</span><small>${esc(when(d.mtime))} · ${d.bytes < 1024 ? d.bytes + " B" : (d.bytes/1024).toFixed(0) + " KB"}${d.url ? " · " + esc(new URL(d.url).hostname) : ""}${d.engine ? " · " + esc(d.engine) : ""}</small></a>`).join("") + (r.docs.length > 40 ? `<p class="hint">Showing 40 of ${r.docs.length}. Older files: ~/.torus/vault/${esc(docDir)}</p>` : "")
+      : `<p class="hint" data-testid="docs-empty">${docDir === "answers" ? "No answers yet. Ask something on the Ask tab." : docDir === "inbox" ? "No pages read yet." : "No topic digests yet. Pin a topic below and refill."}</p>`;
+  } catch (err) { el.innerHTML = `<p class="hint" data-testid="docs-missing">${esc(err.message)}</p>`; }
+}
+
+async function viewDoc(rel) {
+  const d = await api("/api/vault/doc?path=" + encodeURIComponent(rel));
+  const m = d.meta || {};
+  const facts = [m.url ? `<a href="${esc(m.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--blue)">${esc(m.url)}</a>` : "", m.fetched ? "read " + esc(m.fetched.replace("T", " ").slice(0, 16)) : "", m.created ? esc(m.created.replace("T", " ").slice(0, 16)) : "", m.refilled ? "refilled " + esc(m.refilled.replace("T", " ").slice(0, 16)) : "", m.engine ? "engine " + esc(m.engine) : "", m.job ? `<a href="#/job/${esc(m.job)}" data-testid="doc-job-link">open job ${esc(m.job)}</a>` : ""].filter(Boolean);
+  $("#view").innerHTML = `<div class="card"><a href="#/vault" class="hint" data-testid="doc-back">‹ Vault</a>
+    <h2 style="margin:8px 0 4px;font:700 18px var(--mono);color:var(--amber)" data-testid="doc-title">${esc(d.title)}</h2>
+    <p class="hint" data-testid="doc-meta">${facts.join(" · ")}${facts.length ? " · " : ""}<code class="k">vault/${esc(d.rel)}</code></p>
+    ${d.summary ? `<details data-testid="doc-summary"><summary class="hint" style="cursor:pointer;min-height:44px;display:flex;align-items:center">Key sentences (TextRank)</summary><div class="answer">${md(d.summary)}</div></details>` : ""}
+    <div class="answer" data-testid="doc-body">${md(d.text)}</div>
+    ${d.truncated ? `<p class="warn">Showing the first ${(d.bytes/1e6).toFixed(1)} MB of this file.</p>` : ""}</div>`;
+  const body = $("[data-testid=doc-body]");
+  const srcHead = [...body.querySelectorAll("h2")].find(h => /^sources$/i.test(h.textContent.trim()));
+  const srcList = srcHead && srcHead.nextElementSibling && /^[OU]L$/.test(srcHead.nextElementSibling.tagName) ? [...srcHead.nextElementSibling.children] : [];
+  srcList.forEach((li, i) => li.id = "src-" + (i + 1));
+  $("#view").onclick = e => {
+    const c = e.target.closest("[data-cite]"); if (!c) return; e.preventDefault();
+    const li = $("#src-" + c.dataset.cite); if (!li) { toast("Source " + c.dataset.cite + " is not listed in this file"); return; }
+    body.querySelectorAll("li.hit").forEach(x => x.classList.remove("hit")); li.classList.add("hit"); li.scrollIntoView({behavior: "smooth", block: "center"});
+  };
+  return d;
 }
 
 async function viewSettings() {
@@ -397,9 +448,13 @@ async function viewSettings() {
   <div class="card"><label style="margin-top:0">Claude (your Anthropic key)</label>
     <div class="seg" data-testid="settings-llm-toggle"><button data-llm="1" class="${s.llm_enabled?"on":""}" data-testid="settings-llm-on">On</button><button data-llm="0" class="${!s.llm_enabled?"on":""}" data-testid="settings-llm-off">Off</button></div>
     <label>Default model</label>
-    <div class="seg" data-testid="settings-model-toggle"><button data-model="sonnet" class="${s.model==="sonnet"?"on":""}" data-testid="settings-model-sonnet">Sonnet</button><button data-model="opus" class="${s.model==="opus"?"on":""}" data-testid="settings-model-opus">Opus</button></div>
-    <p class="hint">Model id in use: <code class="k" data-testid="settings-model-id">${esc(s.model_id)}</code>. Change it with <code class="k">torus llm id sonnet &lt;id&gt;</code>. List valid ids: <code class="k">torus llm models</code></p>
+    <div class="seg" data-testid="settings-model-toggle">${["sonnet","opus","haiku"].map(m=>`<button data-model="${m}" class="${s.model===m?"on":""}" data-testid="settings-model-${m}">${m[0].toUpperCase()+m.slice(1)}</button>`).join("")}</div>
+    <p class="hint">Model id in use: <code class="k" data-testid="settings-model-id">${esc(s.model_id)}</code>. Sonnet for answers, Opus for code, Haiku when speed and cost matter more than depth.</p>
     <p class="hint" data-testid="settings-anthropic-key">Anthropic key: <b class="${s.keys.anthropic?"s-ok":"s-error"}">${s.keys.anthropic?"stored":"not set"}</b>. Keys never go into the browser. Set one in Termux with <code class="k">torus key set anthropic</code></p></div>
+  <div class="card" data-testid="settings-models"><label style="margin-top:0">Claude model ids</label>
+    <div id="models-body"><p class="hint">loading…</p></div>
+    <div class="row"><button id="models-verify" data-testid="models-verify" ${s.keys.anthropic?"":"disabled"}>Verify model ids</button></div>
+    <p class="hint">Asks Anthropic (with your key) which models exist and points each tier at the newest one of its family. Same as <code class="k">torus llm verify</code>.${s.keys.anthropic?"":" Needs an Anthropic key first."}</p></div>
   <div class="card"><label style="margin-top:0">Default sources for questions</label>
     <div class="seg" data-testid="settings-search-toggle">${["urls","brave","both"].map(m=>`<button data-search="${m}" class="${s.search_mode===m?"on":""}" data-testid="settings-search-${m}">${m==="urls"?"Pasted URLs":m==="brave"?"Brave Search":"Both"}</button>`).join("")}</div>
     <p class="hint" data-testid="settings-brave-key">Brave Search key: <b class="${s.keys.brave?"s-ok":"s-error"}">${s.keys.brave?"stored":"not set"}</b>. Set one with <code class="k">torus key set brave</code></p></div>
@@ -414,7 +469,21 @@ async function viewSettings() {
     <div class="row"><button id="export-run" data-testid="export-run">Export setup</button>
       <label class="hint" style="margin:0;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="export-keys" data-testid="export-with-keys" style="width:22px;height:22px;accent-color:var(--amber)"> include API keys</label></div>
     <p class="hint">Writes a signed <code class="k">torus-&lt;date&gt;.tar.gz</code> to Downloads. Restore on another phone with <code class="k">torus restore &lt;file&gt;</code>.</p></div>`;
-  renderAudit(); renderExports();
+  renderAudit(); renderExports(); renderModels();
+  $("#models-verify").onclick = async () => {
+    $("#models-verify").disabled = true;
+    try { const r = await api("/api/llm/verify", {fix: true}); settings = r.settings;
+      toast(r.changes.length ? "Fixed: " + r.changes.map(c => `${c.tier} → ${c.to}`).join(", ") : "All model ids are current"); await renderModels(r);
+      const idEl = $("[data-testid=settings-model-id]"); if (idEl) idEl.textContent = settings.model_id; }
+    catch (err) { toast(err.message); }
+    $("#models-verify").disabled = false;
+  };
+  $("#models-body").onchange = async e => {
+    const sel = e.target.closest("select[data-tier]"); if (!sel || !sel.value) return;
+    try { settings = await api("/api/settings", {[sel.dataset.tier + "_id"]: sel.value}); toast(`${sel.dataset.tier} → ${sel.value}`); await renderModels();
+      const idEl = $("[data-testid=settings-model-id]"); if (idEl) idEl.textContent = settings.model_id; }
+    catch (err) { toast(err.message); }
+  };
   $("#audit-run").onclick = async () => { $("#audit-run").disabled = true; try { await renderAudit(true); toast("Audit done"); } catch (err) { toast(err.message); } $("#audit-run").disabled = false; };
   $("#export-run").onclick = async () => {
     const withKeys = $("#export-keys").checked;
@@ -436,6 +505,20 @@ async function viewSettings() {
     if (!body) return;
     try { settings = await api("/api/settings", body); toast("Saved"); viewSettings(); } catch (err) { toast(err.message); }
   };
+}
+
+const tierCls = {ok: "s-ok", outdated: "s-needs_you", missing: "s-error", unknown: "hint", unchecked: "hint"};
+const tierWord = {ok: "current", outdated: "newer available", missing: "retired id", unknown: "not visible to your key", unchecked: "not checked yet"};
+async function renderModels(report) {
+  const el = $("#models-body"); if (!el) return;
+  let r = report;
+  if (!r) { try { r = await api("/api/llm/verify"); } catch (err) { el.innerHTML = `<p class="hint">${esc(err.message)}</p>`; return; } }
+  const tiers = settings.tiers, live = r.tiers || {};
+  el.innerHTML = Object.keys(tiers).map(t => { const info = live[t] || {}; const st = info.status || tiers[t].status || "unchecked"; const opts = info.available || [];
+    return `<div class="svc" style="display:block" data-testid="model-tier-${t}"><div style="display:flex;justify-content:space-between;gap:8px;min-height:32px;align-items:center"><span><b>${t}</b> <span class="hint">${esc(tiers[t].role)}</span></span><span class="${tierCls[st]}" style="white-space:nowrap" data-testid="model-tier-status-${t}">${esc(tierWord[st])}</span></div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:4px"><code class="k" data-testid="model-tier-id-${t}" style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(tiers[t].id)}</code>
+      ${opts.length ? `<select data-tier="${t}" data-testid="model-tier-select-${t}" style="width:auto;max-width:55%"><option value="">change…</option>${opts.map(id => `<option value="${esc(id)}" ${id===tiers[t].id?"disabled":""}>${esc(id)}</option>`).join("")}</select>` : ""}</div></div>`; }).join("") +
+    `<p class="hint" data-testid="models-checked">${r.when ? `Checked ${esc(when(r.when))} · ${r.models.length} models visible to your key` : "Not checked yet. Tap Verify, or run torus llm verify."}${r.changes && r.changes.length ? `<br>fixed: ${r.changes.map(c => esc(c.tier + ": " + c.from + " → " + c.to)).join("; ")}` : ""}</p>`;
 }
 
 const auditIcon = {pass: "✓", fail: "✗", warn: "!", skip: "–"}, auditCls = {pass: "s-ok", fail: "s-error", warn: "s-needs_you", skip: "hint"};
@@ -462,7 +545,7 @@ async function renderExports() {
 async function route() {
   clearTimeout(pollTimer);
   const [, tab, id] = (location.hash || "#/ask").split("/");
-  document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === (tab === "job" ? "jobs" : tab === "task" ? "code" : tab || "ask")));
+  document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === (tab === "job" ? "jobs" : tab === "task" ? "code" : tab === "doc" ? "vault" : tab || "ask")));
   try {
     if (tab === "job" && id) {
       const j = await viewJob(id);
@@ -470,7 +553,8 @@ async function route() {
     } else if (tab === "task" && id) {
       const t = await viewTask(id);
       if (t.running) pollTimer = setTimeout(route, 2000);
-    } else if (tab === "code") await viewCode();
+    } else if (tab === "doc" && id) await viewDoc(decodeURIComponent(location.hash.split("/").slice(2).join("/")));
+    else if (tab === "code") await viewCode();
     else if (tab === "jobs") await viewJobs();
     else if (tab === "vault") await viewVault();
     else if (tab === "settings") await viewSettings();

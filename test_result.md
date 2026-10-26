@@ -113,3 +113,8 @@
 # Vault tab card (data-testid vault-oracle, oracle-summary, oracle-topic-<name>, oracle-run, oracle-run-topic, oracle-edit, oracle-yaml, oracle-save, oracle-cancel).
 # Own tests: /tmp/tv/bin/python -m pytest -n 0 -p no:cacheprovider backend/tests/test_torus_oracle.py -> 15/15; phase8_9 + iter7 suites 31/31 still green.
 # backend/.env + frontend/.env were missing after the fork; recreated (local Mongo). Web-app backend on :8001 serves /api/phases/{7,8,9} with the new catalog.
+# 2026-10-26 main agent (round 2): model-id verify, Haiku tier, Vault dossier reader, audit badge, oracle "new" badges.
+# Mesh: FAKE_LLM=1 torus/tests/run_local_mesh.sh start  (fake Claude answers torus.llm.models with a canned list; /tmp/torus-test/airgap/anthropic.key must exist for /api/llm/*).
+# New API: GET/POST /api/llm/verify {fix}, POST /api/llm/models, settings accepts model=haiku and sonnet_id/opus_id/haiku_id; GET /api/vault/docs?dir=answers|inbox|topics, GET /api/vault/doc?path=<dir>/<file>.md; /api/health.audit_fail; oracle topics carry changed/changed_at, results carry hash/changed.
+# UI: Settings card settings-models (models-verify, model-tier-<t>, model-tier-status-<t>, model-tier-id-<t>, model-tier-select-<t>, models-checked); nav badge audit-badge; Vault card vault-docs (docs-folder-<dir>, docs-list, doc-row) -> route #/doc/<encoded rel> (doc-title, doc-meta, doc-body, doc-back, doc-summary, doc-job-link); oracle-new-<topic> pill, oracle-digest-link.
+# Own tests: backend/tests/test_torus_models_docs.py 19/19; all earlier torus suites 89/89.

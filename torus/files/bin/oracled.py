@@ -16,6 +16,7 @@ State lives in var/oracle.json; every run is appended to logs/oracle.jsonl.
 Config is re-read on every cycle, so editing pinned.yaml never needs a restart.
 """
 import asyncio
+import hashlib
 import json
 import os
 import re
@@ -184,7 +185,8 @@ def status_payload():
         results = [r for r in st.get("results", []) if r["url"] in t["seeds"]]
         ok = sum(1 for r in results if r["status"] == "ok")
         rows.append({"name": t["name"], "seeds": t["seeds"], "when": st.get("when", 0), "ok": ok,
-                     "fail": len(results) - ok, "results": results, "digest": st.get("digest", "")})
+                     "fail": len(results) - ok, "results": results, "digest": st.get("digest", ""),
+                     "changed": sum(1 for r in results if r.get("changed")), "changed_at": st.get("changed_at", 0)})
     return {"ok": True, "enabled": conf["enabled"], "every_minutes": conf["every_minutes"], "fresh": conf["fresh"],
             "last_run": STATE["last_run"], "next_run": STATE["next_run"], "runs": STATE["runs"],
             "running": STATE["running"], "current": STATE["current"], "topics": rows, "error": err,
@@ -204,27 +206,32 @@ def write_digest(topic, results, when):
     TOPICS_DIR.mkdir(parents=True, exist_ok=True)
     path = TOPICS_DIR / f"{slugify(topic['name'])}.md"
     ok = sum(1 for r in results if r["status"] == "ok")
+    changed = sum(1 for r in results if r.get("changed"))
     parts = [f"---\ntopic: {json.dumps(topic['name'])}\nrefilled: {time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(when))}\n"
-             f"seeds: {len(results)}\nok: {ok}\n---\n\n# {topic['name']}\n\n"
-             f"_Refilled {time.strftime('%Y-%m-%d %H:%M', time.localtime(when))} by oracled. {ok}/{len(results)} seeds read._\n"]
+             f"seeds: {len(results)}\nok: {ok}\nchanged: {changed}\n---\n\n# {topic['name']}\n\n"
+             f"_Refilled {time.strftime('%Y-%m-%d %H:%M', time.localtime(when))} by oracled. {ok}/{len(results)} seeds read, "
+             f"{changed} changed since the last refill._\n"]
     for r in results:
-        head = f"## {r.get('title') or r['url']}\n\n<{r['url']}>  \n"
+        head = f"## {r.get('title') or r['url']}\n\n{r['url']}  \n"
         if r["status"] != "ok":
             parts.append(head + f"**{r['status']}** - {r.get('error') or ''}\n")
             continue
         sents = "\n".join(f"- {s}" for s in r.get("key", [])) or "- (no readable sentences)"
-        parts.append(head + f"{r.get('chars', 0)} chars{' (from cache)' if r.get('cached') else ''}\n\n{sents}\n")
+        tag = " · **changed since last refill**" if r.get("changed") and r.get("hash") else ""
+        parts.append(head + f"{r.get('chars', 0)} chars{' (from cache)' if r.get('cached') else ''}{tag}\n\n{sents}\n")
     atomic_write(path, "\n".join(parts))
     return str(path)
 
 
 async def run_topic(nc, topic, fresh):
     results = []
+    prev = {r["url"]: r for r in (STATE["topics"].get(topic["name"]) or {}).get("results", [])}
     for url in topic["seeds"]:
         STATE["current"] = f"{topic['name']}: {url}"
         save_state()
         res = await fetch_seed(nc, url, fresh)
-        row = {"url": url, "status": "ok", "title": "", "chars": 0, "error": "", "cached": bool(res.get("cached"))}
+        row = {"url": url, "status": "ok", "title": "", "chars": 0, "error": "", "cached": bool(res.get("cached")),
+               "hash": prev.get(url, {}).get("hash", ""), "changed": False}
         if res.get("robots_blocked"):
             row.update(status="robots", error="robots.txt asks bots to stay out")
         elif res.get("blocked"):
@@ -237,18 +244,24 @@ async def run_topic(nc, topic, fresh):
             if len(text.strip()) < 80:
                 row.update(status="empty", error="page came back almost empty (needs JavaScript?)")
             else:
-                row.update(title=title or url, chars=len(text), key=await asyncio.to_thread(textrank, text, 3))
+                h = hashlib.sha256(" ".join(text.split()).encode("utf-8")).hexdigest()[:16]
+                row.update(title=title or url, chars=len(text), key=await asyncio.to_thread(textrank, text, 3),
+                           hash=h, changed=h != prev.get(url, {}).get("hash", ""))
         results.append(row)
-        log(NAME, topic["name"], row["status"], url, row["error"])
+        log(NAME, topic["name"], row["status"], url, "changed" if row["changed"] else "", row["error"])
     when = time.time()
     ok = sum(1 for r in results if r["status"] == "ok")
+    changed = sum(1 for r in results if r["changed"])
     digest = write_digest(topic, results, when)
+    old = STATE["topics"].get(topic["name"]) or {}
     STATE["topics"][topic["name"]] = {"when": when, "ok": ok, "fail": len(results) - ok, "digest": digest,
+                                      "changed": changed, "changed_at": when if changed else old.get("changed_at", 0),
                                       "results": [{k: v for k, v in r.items() if k != "key"} for r in results]}
     save_state()
-    append_jsonl(RUN_LOG, {"when": when, "topic": topic["name"], "ok": ok, "fail": len(results) - ok,
+    append_jsonl(RUN_LOG, {"when": when, "topic": topic["name"], "ok": ok, "fail": len(results) - ok, "changed": changed,
                            "seeds": [(r["url"], r["status"]) for r in results]})
-    await nc.publish("torus.oracle.done", pack({"topic": topic["name"], "ok": ok, "fail": len(results) - ok, "when": when}))
+    await nc.publish("torus.oracle.done", pack({"topic": topic["name"], "ok": ok, "fail": len(results) - ok,
+                                                 "changed": changed, "when": when}))
     return ok, len(results) - ok
 
 

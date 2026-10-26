@@ -56,6 +56,8 @@ torus: your local research assistant
   torus key set anthropic|brave    store a key (typed hidden, file mode 600)
   torus key status | torus key rm <name>
   torus llm on|off|status|test|models
+  torus llm verify           check the 3 model ids (sonnet/opus/haiku) against Anthropic and fix stale ones
+  torus llm model <tier>     default tier: sonnet (answers), opus (code), haiku (fast and cheap)
   torus llm model sonnet|opus      default model
   torus llm id sonnet|opus <id>    exact Anthropic model id
   torus search mode urls|brave|both  |  torus search count 1-10
@@ -241,12 +243,13 @@ cmd_llm() {
   case "${1:-status}" in
     on)  ctl conf llm enabled=true ;;
     off) ctl conf llm enabled=false ;;
-    model) case "${2:-}" in sonnet|opus) ctl conf llm "model=$2" ;; *) die "usage: torus llm model sonnet|opus" ;; esac ;;
-    id) case "${2:-}" in sonnet|opus) [ -n "${3:-}" ] || die "usage: torus llm id sonnet <model-id>"; ctl conf llm "${2}_id=$3" ;; *) die "usage: torus llm id sonnet|opus <model-id>" ;; esac ;;
+    model) case "${2:-}" in sonnet|opus|haiku) ctl conf llm "model=$2" ;; *) die "usage: torus llm model sonnet|opus|haiku" ;; esac ;;
+    id) case "${2:-}" in sonnet|opus|haiku) [ -n "${3:-}" ] || die "usage: torus llm id sonnet <model-id>"; ctl conf llm "${2}_id=$3" ;; *) die "usage: torus llm id sonnet|opus|haiku <model-id>" ;; esac ;;
     test) ctl selftest llm ;;
     models) ctl models ;;
+    verify) shift; ctl verify "$@" ;;
     status) ctl conf llm ;;
-    *) die "usage: torus llm on|off|status|test|models|model <sonnet|opus>|id <sonnet|opus> <id>" ;;
+    *) die "usage: torus llm on|off|status|test|models|verify [--check-only]|model <sonnet|opus|haiku>|id <tier> <id>" ;;
   esac
 }
 

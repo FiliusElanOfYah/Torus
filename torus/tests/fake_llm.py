@@ -26,6 +26,17 @@ async def main():
         await nc.publish(req["reply_to"], json.dumps({"ok": True, "text": text, "model": "stub"}).encode())
 
     await nc.subscribe("torus.llm.egress", cb=on)
+
+    async def on_models(msg):  # what Anthropic's /v1/models looks like, with one tier outdated and one retired
+        models = [{"id": "claude-sonnet-5-5", "display_name": "Claude Sonnet 5.5", "created_at": "2026-03-01T00:00:00Z"},
+                  {"id": "claude-sonnet-5-0", "display_name": "Claude Sonnet 5", "created_at": "2025-11-01T00:00:00Z"},
+                  {"id": "claude-opus-5-5", "display_name": "Claude Opus 5.5", "created_at": "2026-03-01T00:00:00Z"},
+                  {"id": "claude-opus-4-8", "display_name": "Claude Opus 4.8", "created_at": "2025-12-01T00:00:00Z"},
+                  {"id": "claude-haiku-5-5", "display_name": "Claude Haiku 5.5", "created_at": "2026-03-01T00:00:00Z"},
+                  {"id": "claude-haiku-4-5-20251001", "display_name": "Claude Haiku 4.5", "created_at": "2025-10-01T00:00:00Z"}]
+        await nc.publish(msg.reply, json.dumps({"ok": True, "models": models}).encode())
+
+    await nc.subscribe("torus.llm.models", cb=on_models)
     await asyncio.Event().wait()
 
 asyncio.run(main())

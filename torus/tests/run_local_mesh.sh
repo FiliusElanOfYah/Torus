@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Dev-only: run the whole TORUS mesh on a normal Linux box (no Termux/runit) for testing.
-# usage: torus/tests/run_local_mesh.sh start|stop
+# usage: torus/tests/run_local_mesh.sh start|stop      FAKE_LLM=1 start -> tests/fake_llm.py stands in for llmd
 set -u
 T="${TORUS_HOME:-/tmp/torus-test}"
 PY="${TORUS_PY:-/tmp/tv/bin/python}"
@@ -19,11 +19,16 @@ case "${1:-start}" in
     [ -f "$T/etc/coder.conf" ] || printf 'root=%s/projects\nrun_timeout=60\n' "$T" > "$T/etc/coder.conf"
     pgrep -f "nats-server -a 127.0.0.1" >/dev/null || setsid nohup nats-server -a 127.0.0.1 -p 4222 >"$T/logs/nats.log" 2>&1 </dev/null &
     sleep 1
+    pkill -f "tests/fake_llm.py" 2>/dev/null
     for d in $DAEMONS; do
       pkill -f "$T/bin/$d.py" 2>/dev/null
+      if [ "$d" = llmd ] && [ "${FAKE_LLM:-0}" = 1 ]; then
+        PYTHONUNBUFFERED=1 setsid nohup "$PY" "$(dirname "$0")/fake_llm.py" >"$T/logs/fake_llm.log" 2>&1 </dev/null &
+        continue
+      fi
       PYTHONUNBUFFERED=1 setsid nohup "$PY" "$T/bin/$d.py" >"$T/logs/$d.log" 2>&1 </dev/null &
     done
     sleep 3; echo "mesh started in $T (logs in $T/logs)";;
   stop)
-    for d in $DAEMONS; do pkill -f "$T/bin/$d.py"; done; pkill -f "nats-server -a 127.0.0.1"; echo stopped;;
+    for d in $DAEMONS; do pkill -f "$T/bin/$d.py"; done; pkill -f "tests/fake_llm.py"; pkill -f "nats-server -a 127.0.0.1"; echo stopped;;
 esac

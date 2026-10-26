@@ -29,9 +29,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import httpx  # noqa: E402
 import gateway_code  # noqa: E402
 from torus_cite import citation_map, extract_links  # noqa: E402
-from torus_common import (ETC, HOME, LLM_TOGGLE, SEARCH_CONF, VAR, VAULT, atomic_write, connect_nats,  # noqa: E402
-                          extract, get_secret, key_present, llm_settings, log, pack, rank_sentences, read_conf,
-                          search_settings, slugify, split_sentences, write_conf)
+import torus_models  # noqa: E402
+from torus_common import (ETC, HOME, LLM_TOGGLE, MODEL_ALIASES, SEARCH_CONF, VAR, VAULT, atomic_write,  # noqa: E402
+                          connect_nats, extract, get_secret, key_present, llm_settings, log, pack, rank_sentences,
+                          read_conf, resolve_model, search_settings, slugify, split_sentences, truthy, write_conf)
 from torus_report import build_pdf  # noqa: E402
 
 NAME = "gatewayd"
@@ -335,8 +336,8 @@ async def api_ask(body):
     if mode not in ("urls", "brave", "both"):
         return err(400, "mode must be urls, brave or both")
     model = body.get("model") or None
-    if model and model not in ("sonnet", "opus"):
-        return err(400, "model must be sonnet or opus")
+    if model and model not in MODEL_ALIASES:
+        return err(400, "model must be sonnet, opus or haiku")
     jid = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
     j = {"id": jid, "question": q, "urls": urls, "mode": mode, "model": model, "fresh": bool(body.get("fresh")),
          "status": "queued", "created": time.time(), "sources": [], "warnings": [], "log": [],
@@ -390,8 +391,8 @@ async def api_rerun(j, body):
     if j["id"] in tasks:
         return err(409, "job is still running")
     model = body.get("model")
-    if model and model not in ("sonnet", "opus"):
-        return err(400, "model must be sonnet or opus")
+    if model and model not in MODEL_ALIASES:
+        return err(400, "model must be sonnet, opus or haiku")
     t = current_turn(j)
     if t is j:
         j["model"] = model or j.get("model")
@@ -410,8 +411,8 @@ async def api_followup(j, body):
     if not q:
         return err(400, "question is required")
     model = body.get("model") or None
-    if model and model not in ("sonnet", "opus"):
-        return err(400, "model must be sonnet or opus")
+    if model and model not in MODEL_ALIASES:
+        return err(400, "model must be sonnet, opus or haiku")
     urls = body.get("urls") or []
     if isinstance(urls, str):
         urls = urls.split()
@@ -460,28 +461,47 @@ async def sv_status():
 def settings_payload():
     llm, srch = llm_settings(), search_settings()
     c = read_conf(LLM_TOGGLE)
+    last = torus_models.last() or {}
     return {"llm_enabled": llm["enabled"], "model": llm["model"], "model_id": llm["model_id"],
-            "sonnet_id": c.get("sonnet_id") or "claude-sonnet-5-5", "opus_id": c.get("opus_id") or "claude-opus-5-5",
+            "sonnet_id": resolve_model("sonnet", c), "opus_id": resolve_model("opus", c), "haiku_id": resolve_model("haiku", c),
+            "tiers": {t: {"id": resolve_model(t, c), "role": torus_models.TIER_ROLE[t],
+                          "status": (last.get("tiers", {}).get(t) or {}).get("status", "unchecked")} for t in torus_models.TIERS},
+            "models_checked": last.get("when", 0), "models_problems": last.get("problems", 0),
             "search_mode": srch["mode"], "search_count": srch["count"],
             "keys": {"anthropic": key_present("anthropic"), "brave": key_present("brave")}}
 
 
 async def api_settings(body):
+    # validate everything first so a bad field never leaves a half-applied request
+    if "model" in body and body["model"] not in MODEL_ALIASES:
+        return err(400, "model must be sonnet, opus or haiku")
+    if "search_mode" in body and body["search_mode"] not in ("urls", "brave", "both"):
+        return err(400, "search_mode must be urls, brave or both")
+    if "search_count" in body:
+        try:
+            body["search_count"] = max(1, min(10, int(body["search_count"])))
+        except (TypeError, ValueError):
+            return err(400, "search_count must be a number 1-10")
+    tier_ids = {t: str(body[f"{t}_id"]).strip() for t in torus_models.TIERS if f"{t}_id" in body}
+    for t, mid in tier_ids.items():
+        why = torus_models.validate_tier_id(t, mid)
+        if why:
+            return err(400, why)
     if "llm_enabled" in body:
         write_conf(LLM_TOGGLE, {"enabled": "true" if body["llm_enabled"] else "false"})
     if "model" in body:
-        if body["model"] not in ("sonnet", "opus"):
-            return err(400, "model must be sonnet or opus")
         write_conf(LLM_TOGGLE, {"model": body["model"]})
+    if tier_ids:
+        write_conf(LLM_TOGGLE, {f"{t}_id": mid for t, mid in tier_ids.items()})
+        last = torus_models.last()
+        if last:  # the saved report is about the old ids; re-check against the same model list
+            rep = torus_models.check(last["models"])
+            rep["changes"] = []
+            torus_models.save(rep)
     if "search_mode" in body:
-        if body["search_mode"] not in ("urls", "brave", "both"):
-            return err(400, "search_mode must be urls, brave or both")
         write_conf(SEARCH_CONF, {"mode": body["search_mode"]})
     if "search_count" in body:
-        try:
-            write_conf(SEARCH_CONF, {"count": max(1, min(10, int(body["search_count"])))})
-        except (TypeError, ValueError):
-            return err(400, "search_count must be a number 1-10")
+        write_conf(SEARCH_CONF, {"count": body["search_count"]})
     return 200, settings_payload()
 
 
@@ -493,6 +513,131 @@ async def api_audit(method):
     if method == "POST":
         return 200, await asyncio.to_thread(torus_audit.run_audit)
     return 200, torus_audit.last_audit() or {"ok": None, "counts": {}, "items": [], "when": ""}
+
+
+def audit_failures():
+    try:
+        return int(json.loads((VAR / "audit.json").read_text(encoding="utf-8"))["counts"].get("fail", 0))
+    except (OSError, ValueError, KeyError, TypeError):
+        return 0
+
+
+async def api_llm(method, path, body):
+    """Model ids. GET /api/llm/verify = last report; POST /api/llm/verify {fix} = live check against Anthropic."""
+    if path == "/api/llm/verify" and method == "GET":
+        return 200, torus_models.last() or {"ok": None, "tiers": {}, "models": [], "changes": [], "problems": 0, "when": 0}
+    if path in ("/api/llm/verify", "/api/llm/models"):
+        if not key_present("anthropic"):
+            return err(409, "no Anthropic key yet: torus key set anthropic")
+        try:
+            res = await asyncio.wait_for(nreq("torus.llm.models", {}, 60), 65)
+        except Exception as e:
+            return err(503, f"llmd did not answer ({e.__class__.__name__}); check: torus status")
+        if not res.get("ok"):
+            return err(502, f"Anthropic did not list models: {res.get('error')}")
+        if path == "/api/llm/models":
+            return 200, {"ok": True, "models": res["models"]}
+        rep = await asyncio.to_thread(torus_models.check, res["models"])
+        fix = body.get("fix", True)
+        if truthy(fix) if isinstance(fix, str) else bool(fix):
+            await asyncio.to_thread(torus_models.fix, rep)
+        await asyncio.to_thread(torus_models.save, rep)
+        for ch in rep["changes"]:
+            log(NAME, f"model id fixed: {ch['tier']} {ch['from']} -> {ch['to']}")
+        return 200, rep | {"settings": settings_payload()}
+    return err(404, "not found")
+
+
+# ---------------------------------------------------------------- vault documents (dossiers)
+DOC_DIRS = {"inbox": "Pages read (inbox)", "answers": "Answers", "topics": "Topic digests"}
+DOC_MAX_BYTES = 400_000
+
+
+def doc_meta(text):
+    """Frontmatter -> dict, plus the first heading. Values stay strings."""
+    meta, body = {}, text
+    if text.startswith("---\n"):
+        end = text.find("\n---", 4)
+        if end > 0:
+            for ln in text[4:end].splitlines():
+                k, _, v = ln.partition(":")
+                if _ and k.strip():
+                    v = v.strip()
+                    if len(v) >= 2 and v[0] == v[-1] == '"':
+                        try:
+                            v = json.loads(v)
+                        except ValueError:
+                            v = v[1:-1]
+                    meta[k.strip()] = v
+            body = text[end + 4:]
+    m = re.search(r"^#\s+(.+)$", body, re.M)
+    return meta, (m.group(1).strip() if m else "")
+
+
+def safe_doc_path(rel):
+    rel = (rel or "").strip().lstrip("/")
+    parts = rel.split("/")
+    if len(parts) != 2 or parts[0] not in DOC_DIRS or not parts[1].endswith(".md") or "/" in parts[1] or parts[1].startswith("."):
+        return None
+    p = (VAULT / parts[0] / parts[1])
+    try:
+        p.resolve().relative_to(VAULT.resolve())
+    except ValueError:
+        return None
+    return p if p.is_file() else None
+
+
+def list_docs(folder, limit=200):
+    d = VAULT / folder
+    rows = []
+    if not d.is_dir():
+        return rows
+    files = sorted((p for p in d.iterdir() if p.suffix == ".md" and not p.name.startswith(".")),
+                   key=lambda p: p.stat().st_mtime, reverse=True)
+    summaries = {p.name for p in files if p.name.endswith(".summary.md")}
+    for p in files:
+        if p.name.endswith(".summary.md"):
+            continue
+        st = p.stat()
+        try:
+            with p.open(encoding="utf-8", errors="replace") as f:
+                head = f.read(2048)
+        except OSError:
+            continue
+        meta, title = doc_meta(head)
+        rows.append({"rel": f"{folder}/{p.name}", "name": p.name, "title": meta.get("title") or title or p.stem,
+                     "mtime": st.st_mtime, "bytes": st.st_size, "url": meta.get("url", ""), "job": meta.get("job", ""),
+                     "engine": meta.get("engine", ""), "has_summary": p.name[:-3] + ".summary.md" in summaries})
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+async def api_vault_docs(path, query):
+    if path == "/api/vault/docs":
+        folder = (query.get("dir") or ["answers"])[0]
+        if folder not in DOC_DIRS:
+            return err(400, "dir must be inbox, answers or topics")
+        rows = await asyncio.to_thread(list_docs, folder)
+        counts = {k: sum(1 for p in (VAULT / k).glob("*.md") if not p.name.endswith(".summary.md") and not p.name.startswith("."))
+                  if (VAULT / k).is_dir() else 0
+                  for k in DOC_DIRS}
+        return 200, {"dir": folder, "label": DOC_DIRS[folder], "docs": rows, "counts": counts}
+    if path == "/api/vault/doc":
+        p = safe_doc_path((query.get("path") or [""])[0])
+        if not p:
+            return err(404, "no such document")
+        raw = await asyncio.to_thread(p.read_bytes)
+        text = raw[:DOC_MAX_BYTES].decode("utf-8", errors="replace")
+        meta, title = doc_meta(text)
+        body = text.split("\n---", 1)[1] if text.startswith("---\n") and "\n---" in text else text
+        out = {"rel": f"{p.parent.name}/{p.name}", "name": p.name, "title": meta.get("title") or title or p.stem, "meta": meta,
+               "text": body.lstrip("\n"), "bytes": len(raw), "truncated": len(raw) > DOC_MAX_BYTES, "mtime": p.stat().st_mtime}
+        summary = p.with_name(p.name[:-3] + ".summary.md")
+        if p.parent.name == "inbox" and summary.is_file():
+            out["summary"] = summary.read_text(encoding="utf-8", errors="replace")
+        return 200, out
+    return err(404, "not found")
 
 
 async def api_export(method, body, headers):
@@ -553,9 +698,14 @@ async def route(method, path, query, body, headers=None):
         return await gateway_code.route(method, path, query, body)
     if path == "/api/health":
         nc = STATE["nc"]
-        return 200, {"ok": True, "nats": bool(nc and nc.is_connected), "jobs": len(jobs), "running": len(tasks)}
+        return 200, {"ok": True, "nats": bool(nc and nc.is_connected), "jobs": len(jobs), "running": len(tasks),
+                     "audit_fail": audit_failures()}
     if path == "/api/audit":
         return await api_audit(method)
+    if path.startswith("/api/llm/"):
+        return await api_llm(method, path, body)
+    if method == "GET" and path.startswith("/api/vault/"):
+        return await api_vault_docs(path, query)
     if path == "/api/export":
         return await api_export(method, body, headers)
     if path.startswith("/api/oracle"):

@@ -31,7 +31,7 @@ ROBOTS_AGENT = "TORUS"
 
 # Default Anthropic model ids. Override without code changes:
 #   torus llm id sonnet <model-id>   (writes sonnet_id=... into llm.toggle)
-MODEL_ALIASES = {"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5"}
+MODEL_ALIASES = {"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5", "haiku": "claude-haiku-5-5"}
 
 
 def log(name, *parts):

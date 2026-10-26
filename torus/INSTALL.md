@@ -66,6 +66,17 @@ stored in `~/.torus/airgap/anthropic.key` (mode 600, read only by airgapd).
 - If Claude is rate-limited, TORUS waits and retries. If it still fails, you get
   a local summary instead of a hard stop.
 
+### Model ids (which Claude answers)
+
+TORUS uses three tiers: **sonnet** for answers and follow-ups, **opus** for code and hard
+questions, **haiku** when speed and cost matter more than depth. Anthropic retires model ids
+now and then, so once in a while (or when Claude says "model not found"):
+```
+torus llm verify        # asks Anthropic which models your key can use, points each tier at the newest
+torus llm model haiku   # change the default tier;  torus llm id opus <exact-id>  pins one by hand
+```
+The Settings tab has the same: **Claude model ids → Verify model ids**, with a dropdown per tier.
+
 ## Step 7 (optional): Brave Search
 
 ```
@@ -145,6 +156,13 @@ torus oracle                 # schedule, last/next run, every seed with ok/block
 torus oracle every 120       # change the interval (minutes);  torus oracle off  pauses it
 ```
 No restart is needed after editing the file. No AI is used; it is fetch + extract only.
+
+### Reading what TORUS wrote (Vault → Dossiers)
+
+Every answer, every page read and every topic digest is a Markdown file under `~/.torus/vault/`.
+The **Vault** tab lists them (Answers / Pages read / Topics); tap one to read it on the phone
+with headings, links and clickable `[n]` citations that jump to the source list. Pinned topics
+show an amber **N new** badge when a refill found changed pages since you last looked.
 
 ## Step 10: Hardening (seal + audit)
 

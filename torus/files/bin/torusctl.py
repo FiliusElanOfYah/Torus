@@ -171,7 +171,21 @@ def cmd_models(a):
     if not res.get("ok"):
         sys.exit("FAIL " + str(res.get("error")))
     for m in res["models"]:
-        print(m)
+        m = m if isinstance(m, dict) else {"id": m}
+        print(f"{m['id']:40} {m.get('display_name', '')}")
+
+
+def cmd_verify(a):
+    r = http("POST", "/api/llm/verify", {"fix": not a.check_only})
+    for t, info in r["tiers"].items():
+        mark = {"ok": "OK  ", "outdated": "OLD ", "missing": "GONE", "unknown": "?   "}[info["status"]]
+        print(f"{mark} {t:7} {info['current']:40} {info['role']}" + (f"   newest: {info['newest']}" if info["status"] not in ("ok", "unknown") else ""))
+    for ch in r["changes"]:
+        print(f"fixed {ch['tier']}: {ch['from']} -> {ch['to']}")
+    if r["problems"] and a.check_only:
+        print(f"{r['problems']} tier(s) need a fix: torus llm verify")
+    elif not r["changes"]:
+        print("every tier points at the newest model your key can see")
 
 
 def cmd_search(a):
@@ -206,11 +220,12 @@ def cmd_oracle(a):
     if o.get("error"):
         print("! " + o["error"])
     for t in o["topics"]:
-        print(f"\n{t['name']}   {t['ok']}/{len(t['seeds'])} ok   {fmt(t['when'])}" + (f"   digest: {t['digest']}" if t.get("digest") else ""))
+        print(f"\n{t['name']}   {t['ok']}/{len(t['seeds'])} ok   {fmt(t['when'])}" + (f"   {t['changed']} changed" if t.get("changed") else "")
+              + (f"   digest: {t['digest']}" if t.get("digest") else ""))
         res = {r["url"]: r for r in t.get("results", [])}
         for u in t["seeds"]:
             r = res.get(u, {})
-            print(f"  {r.get('status', '-'):8} {u}" + (f"   {r['error']}" if r.get("error") else ""))
+            print(f"  {r.get('status', '-'):8} {u}" + ("   (changed)" if r.get("changed") else "") + (f"   {r['error']}" if r.get("error") else ""))
     if not o["topics"]:
         print("no pinned topics yet: torus oracle edit")
 
@@ -263,6 +278,9 @@ def main():
     s.add_argument("what", choices=["ingest", "llm"])
     s.set_defaults(fn=cmd_selftest)
     sub.add_parser("models").set_defaults(fn=cmd_models)
+    s = sub.add_parser("verify")
+    s.add_argument("--check-only", action="store_true")
+    s.set_defaults(fn=cmd_verify)
     s = sub.add_parser("search")
     s.add_argument("words", nargs="+")
     s.set_defaults(fn=cmd_search)

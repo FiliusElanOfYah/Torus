@@ -22,6 +22,7 @@
 6 own  0644 bin/gateway_code.py     H:bin/gateway_code.py
 6 own  0644 bin/torus_cite.py       H:bin/torus_cite.py
 6 own  0644 bin/torus_report.py     H:bin/torus_report.py
+6 own  0644 bin/torus_models.py     H:bin/torus_models.py
 6 own  0644 web/index.html          H:web/index.html
 7 own  0755 bin/coderd.py           H:bin/coderd.py
 7 keep 0644 etc/coder.conf          H:etc/coder.conf

@@ -2,11 +2,11 @@
 """llmd - calls Claude (Anthropic API) with httpx using YOUR key.
 
 listens  torus.llm.egress  (from sentineld)  -> publishes result to reply_to
-         torus.llm.models  -> reply {ok, models:[ids]}
+         torus.llm.models  -> reply {ok, models:[{id, display_name, created_at}]}
 
 Settings come from ~/.torus/etc/llm.toggle, re-read on every request:
-  enabled=true|false   model=sonnet|opus   max_tokens=4096
-  sonnet_id=...  opus_id=...   (optional exact model ids)
+  enabled=true|false   model=sonnet|opus|haiku   max_tokens=4096
+  sonnet_id=...  opus_id=...  haiku_id=...   (optional exact model ids; torus llm verify fixes them)
 Rate limits / overloads are retried with backoff, so long sessions slow
 down instead of stopping.
 """
@@ -86,7 +86,8 @@ async def on_models(nc, msg, data):
         key = await get_secret("anthropic")
         r = await client.get(f"{API}/models", params={"limit": 100}, headers=headers(key))
         r.raise_for_status()
-        out = {"ok": True, "models": [m.get("id") for m in r.json().get("data", [])]}
+        out = {"ok": True, "models": [{"id": m.get("id"), "display_name": m.get("display_name", ""),
+                                       "created_at": m.get("created_at", "")} for m in r.json().get("data", []) if m.get("id")]}
     except Exception as e:
         out = {"ok": False, "error": str(e)}
     if msg.reply:
