@@ -62,7 +62,7 @@ class DeviceProfile(BaseModel):
     acode_installed: bool = Field(default=False)
     termux_boot_installed: bool = Field(default=False)
     vault_location: str = Field(default="internal")  # internal | sdcard
-    default_llm: str = Field(default="sonnet-4.5")
+    default_llm: str = Field(default="sonnet")
     opus_for_code: bool = Field(default=True)
     jev_gating: bool = Field(default=True)
 

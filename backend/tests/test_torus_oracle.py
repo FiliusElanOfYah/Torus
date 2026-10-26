@@ -148,3 +148,26 @@ def test_catalog_phase_7_8_9_point_at_installer():
         assert all("liboqs" not in st["command"] for st in p["steps"])
     assert len(phases.get_phase(8)["opsec_checklist"]) == 10
     assert any("torus oracle" in st["command"] for st in phases.get_phase(7)["steps"])
+
+
+# ---------------------------------------------------------------- pin from an answer
+def test_pin_source_creates_topic_and_dedupes(s):
+    pinned = HOME / "etc" / "pinned.yaml"
+    old = pinned.read_text()
+    try:
+        r = s.post(f"{BASE}/api/oracle/pin", json={"url": "ftp://x", "topic": "a"})
+        assert r.status_code == 400
+        r = s.post(f"{BASE}/api/oracle/pin", json={"url": "https://www.iana.org/domains/reserved", "topic": ""})
+        assert r.status_code == 400
+        r = s.post(f"{BASE}/api/oracle/pin", json={"url": "https://www.iana.org/domains/reserved", "topic": "pin test"}).json()
+        assert r["ok"] and r["created"] and not r["already"] and r["seeds"] == ["https://www.iana.org/domains/reserved"]
+        assert "pin test" in pinned.read_text()
+        r = s.post(f"{BASE}/api/oracle/pin", json={"url": "https://www.iana.org/domains/reserved", "topic": "Pin Test"}).json()
+        assert r["already"] and not r["created"] and r["topic"] == "pin test"
+        r = s.post(f"{BASE}/api/oracle/pin", json={"url": "https://www.iana.org/help/example-domains", "topic": "pin test"}).json()
+        assert not r["created"] and len(r["seeds"]) == 2
+        cfg = s.get(f"{BASE}/api/oracle/config").json()
+        assert next(t for t in cfg["topics"] if t["name"] == "pin test")["seeds"] == r["seeds"]
+        wait_idle(s)
+    finally:
+        pinned.write_text(old)

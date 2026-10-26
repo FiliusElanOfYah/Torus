@@ -727,6 +727,39 @@ async def api_oracle(method, path, body):
             return 200, await asyncio.wait_for(nreq("torus.oracle.run", {"topic": topic}, 8), 10)
         except Exception as e:
             return err(503, f"oracled did not answer ({e.__class__.__name__}); check: torus status")
+    if path == "/api/oracle/pin":
+        url = (body.get("url") or "").strip()
+        name = re.sub(r"\s+", " ", (body.get("topic") or "").strip())[:80]
+        if not url.startswith(("http://", "https://")):
+            return err(400, "url must start with http:// or https://")
+        if not name:
+            return err(400, "give the topic a name")
+        topics, perr = oracled.load_pinned()
+        if perr and not oracled.PINNED.exists():
+            topics = []
+        elif perr:
+            return err(409, perr + " - fix the file first (Vault tab, Edit topics)")
+        topic = next((t for t in topics if t["name"].lower() == name.lower()), None)
+        created = topic is None
+        if created:
+            if len(topics) >= oracled.MAX_TOPICS:
+                return err(400, f"you already have {oracled.MAX_TOPICS} topics; unpin one first")
+            topic = {"name": name, "seeds": []}
+            topics.append(topic)
+        already = url in topic["seeds"]
+        if not already:
+            if len(topic["seeds"]) >= oracled.MAX_SEEDS:
+                return err(400, f"'{topic['name']}' already has {oracled.MAX_SEEDS} seeds")
+            topic["seeds"].append(url)
+            await asyncio.to_thread(oracled.atomic_write, oracled.PINNED, oracled.dump_pinned(topics))
+        refilling = False
+        if not already:
+            try:
+                refilling = bool((await asyncio.wait_for(nreq("torus.oracle.run", {"topic": topic["name"]}, 8), 10)).get("ok"))
+            except Exception:
+                refilling = False
+        return 200, {"ok": True, "topic": topic["name"], "seeds": topic["seeds"], "created": created, "already": already,
+                     "refilling": refilling}
     if path == "/api/oracle/config":
         if method == "POST":
             try:

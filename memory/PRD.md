@@ -116,6 +116,12 @@ scripts, service unit files, and bootstrap artifacts for every phase (0 → 9).
 - md(): headings followed by text in the same block, ordered lists, italics, bare-URL autolinks. Settings validation: auto_route must be a bool.
 - Tests: backend/tests/test_torus_autoroute_diff.py 6/6 (local changing page on :8098) + testing-agent test_torus_iter10_t1.py 7/7 (iteration 10); all torus suites green. Fixed after review: rollup headings swallowed the lines, Find highlight markup, string auto_route, hint wording.
 
+### 2026-10-26 · Pin from answer + guide preview fix
+- POST /api/oracle/pin {url, topic} → adds the URL to an existing topic (case-insensitive match) or creates the topic, rewrites pinned.yaml, kicks a refill of that topic (best effort), returns {topic, seeds, created, already, refilling}. Limits: 40 topics / 25 seeds.
+- Phone page: every source row on a job page and every Vault search result has "Pin this source" → inline chooser (existing topic select or "+ new topic" with a name derived from the question) → "pinned · <topic>" pill; job polling pauses while the chooser is open; pinned state is shown from pinned.yaml.
+- Guide preview: the platform launches `yarn expo start --port 3000`; frontend/package.json now has an `expo` script → scripts/dev-shim.js that runs the CRA (craco) dev server on 0.0.0.0:3000 with host-check disabled. `yarn install` was needed in this environment (node_modules were the Expo template's). Device profile "Default LLM" options aligned to tiers (sonnet/opus/haiku).
+- Tests: test_torus_oracle.py 16/16 (pin), backend_test.py 34/34, other torus suites green.
+
 ## Backlog (after 2026-10-26)
 - P1: on the S26 run `torus update && torus install 6 7`, then `torus llm verify` with the real key (the fake list in tests is a stand-in).
 - P2: Mongo use by the daemons, multi-device session roster, amber-high-contrast theme, replace HMAC manifest in the web app with the ML-DSA seal.

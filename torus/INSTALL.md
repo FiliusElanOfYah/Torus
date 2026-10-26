@@ -169,6 +169,9 @@ The **Vault** tab lists them (Answers / Pages read / Topics); tap one to read it
 with headings, links and clickable `[n]` citations that jump to the source list. Pinned topics
 show an amber **N new** badge when a refill found changed pages since you last looked.
 **Find in dossiers** searches every answer, page and digest and opens the matching paragraph.
+**Pin this source** under any source of an answer (or a Vault search result) makes that page a
+seed of a pinned topic in one tap - pick an existing topic or name a new one; oracled reads it
+right away and then on its schedule.
 
 Each pinned topic also gets, per refill, a **What changed** list (the sentences added and
 removed on each page since the last refill) and one **weekly roll-up** page,

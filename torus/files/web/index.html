@@ -207,6 +207,7 @@ async function viewJob(id) {
     ${j.sources.length ? j.sources.map(s => `<div class="src" id="src-${s.n}" data-testid="job-source-${s.n}">
       <span class="pill s-${s.status}">${s.status === "needs_you" ? "needs you" : s.status}</span> <b>[${s.n}]</b> ${esc(s.title || "")}
       <div><a href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${esc(s.url)}</a> <span class="hint">${esc(s.origin)}${s.chars ? " | " + s.chars + " chars" : ""}</span></div>
+      ${pinButton(s.url, j.question)}
       ${s.error ? `<div class="warn">${esc(s.error)}</div>` : ""}
       ${s.preview ? `<details><summary>preview</summary>${esc(s.preview)}</details>` : ""}</div>`).join("") : `<p class="hint">No sources yet.</p>`}
   </div>
@@ -215,6 +216,7 @@ async function viewJob(id) {
            : `<button class="danger" data-act="cancel" data-testid="job-cancel-button">Cancel</button>`}
   </div><label>Log</label><div class="log" data-testid="job-log">${esc(j.log.join("\n"))}</div></div>`;
   $("#view").onclick = async e => {
+    if (await pinClick(e)) return;
     const c = e.target.closest("[data-cite]"); if (c) { e.preventDefault(); const el = $("#src-" + c.dataset.cite); if (el) el.scrollIntoView({behavior: "smooth"}); return; }
     const add = e.target.closest("[data-addurl]"); if (add) { const f = $("#fu-urls"); f.value = (f.value.trim() + "\n" + add.dataset.addurl).trim(); f.scrollIntoView({behavior: "smooth"}); toast("Added to the follow-up URLs"); return; }
     const b = e.target.closest("button[data-act]"); if (!b) return;
@@ -237,6 +239,7 @@ async function viewJob(id) {
     } catch (err) { toast(err.message); }
     route();
   };
+  loadPinned();
   return j;
 }
 
@@ -361,10 +364,12 @@ async function viewVault() {
       <p class="hint">Digests land in <code class="k">vault/topics/&lt;topic&gt;.md</code>; the pages themselves go into your index and inbox. In Termux: <code class="k">torus oracle status|run|every 120|off</code></p></div>`;
   const go = async () => {
     try { const r = await api("/api/search?q=" + encodeURIComponent($("#vq").value));
-      $("#vres").innerHTML = `<div class="card">${(r.results || []).map(x => `<div class="src"><b>${esc(x.title)}</b><div><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.url)}</a></div><div class="hint">${esc(x.snippet)}</div></div>`).join("") || `<p class="hint">No matches.</p>`}</div>`;
+      $("#vres").innerHTML = `<div class="card">${(r.results || []).map(x => `<div class="src"><b>${esc(x.title)}</b><div><a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">${esc(x.url)}</a></div><div class="hint">${esc(x.snippet)}</div>${pinButton(x.url, $("#vq").value)}</div>`).join("") || `<p class="hint">No matches.</p>`}</div>`;
+      loadPinned();
     } catch (e) { toast(e.message); }
   };
   $("#vgo").onclick = go; $("#vq").onkeydown = e => { if (e.key === "Enter") go(); };
+  $("#vres").onclick = e => pinClick(e);
   renderDocs();
   const find = async () => {
     const q = $("#dq").value.trim(); const el = $("#dres");
@@ -402,6 +407,48 @@ async function viewVault() {
     const b = e.target.closest("button[data-topic]"); if (!b) return;
     startRefill({topic: b.dataset.topic}, `Refilling ${b.dataset.topic}`, b);
   };
+}
+
+// ---- pin a page as a topic seed (from any answer's sources or a vault search result)
+let pinnedTopics = null;  // [{name, seeds}] from pinned.yaml, refreshed by loadPinned()
+const topicNameFrom = q => (q || "").toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, " ").split(/\s+/).filter(w => w.length > 2 && !/^(what|which|when|where|does|that|this|with|from|about|into|have|your|their|there|between|versus|explain|compare|are|the|for|and|used|how|why|can|should|would|will)$/.test(w)).slice(0, 4).join("-") || "pinned";
+function pinButton(url, question) {
+  const pinned = pinnedTopics && pinnedTopics.find(t => t.seeds.includes(url));
+  return `<div class="pinbox" data-url="${esc(url)}" data-q="${esc(question || "")}" style="margin-top:6px">${pinned
+    ? `<span class="pill s-ok" data-testid="pin-state">pinned · ${esc(pinned.name)}</span>`
+    : `<button data-pin="open" data-testid="pin-source" style="min-height:36px;padding:6px 12px;font-size:13px">Pin this source</button>`}</div>`;
+}
+async function loadPinned() {
+  try { pinnedTopics = (await api("/api/oracle/config")).topics || []; } catch { pinnedTopics = []; }
+  document.querySelectorAll(".pinbox").forEach(box => { const t = pinnedTopics.find(x => x.seeds.includes(box.dataset.url)); if (t && !box.querySelector("[data-testid=pin-state]")) box.innerHTML = `<span class="pill s-ok" data-testid="pin-state">pinned · ${esc(t.name)}</span>`; });
+}
+async function pinClick(e) {
+  const b = e.target.closest("[data-pin]"); if (!b) return false;
+  const box = b.closest(".pinbox"); const url = box.dataset.url;
+  if (b.dataset.pin === "open") {
+    if (pinnedTopics === null) await loadPinned();
+    const names = pinnedTopics.map(t => t.name);
+    box.innerHTML = `<div class="row" style="align-items:center"><select data-testid="pin-topic-select" style="width:auto;max-width:48%">${names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join("")}<option value="__new" ${names.length ? "" : "selected"}>+ new topic…</option></select>
+      <input type="text" data-testid="pin-topic-name" placeholder="topic name" value="${esc(topicNameFrom(box.dataset.q))}" style="flex:1;min-width:120px;${names.length ? "display:none" : ""}">
+      <button class="primary" data-pin="save" data-testid="pin-save" style="min-height:36px;padding:6px 12px;font-size:13px">Pin</button><button data-pin="cancel" data-testid="pin-cancel" style="min-height:36px;padding:6px 12px;font-size:13px">Cancel</button></div>
+      <p class="hint" style="margin:4px 0 0">oracled will re-read this page on its schedule and show what changed (Vault tab).</p>`;
+    box.querySelector("select").onchange = ev => { box.querySelector("input").style.display = ev.target.value === "__new" ? "" : "none"; if (ev.target.value === "__new") box.querySelector("input").focus(); };
+    return true;
+  }
+  if (b.dataset.pin === "cancel") { box.innerHTML = pinButton(url, box.dataset.q).replace(/^<div[^>]*>|<\/div>$/g, ""); return true; }
+  if (b.dataset.pin === "save") {
+    const sel = box.querySelector("select").value; const topic = sel === "__new" ? box.querySelector("input").value.trim() : sel;
+    if (!topic) { toast("Give the topic a name"); return true; }
+    b.disabled = true;
+    try {
+      const r = await api("/api/oracle/pin", {url, topic});
+      pinnedTopics = null; await loadPinned();
+      box.innerHTML = `<span class="pill s-ok" data-testid="pin-state">pinned · ${esc(r.topic)}</span> <span class="hint">${r.already ? "was already a seed" : (r.created ? "new topic · " : "") + (r.refilling ? "first read started" : "")}</span>`;
+      toast(r.already ? `Already pinned under ${r.topic}` : `Pinned to ${r.topic}`);
+    } catch (err) { toast(err.message); b.disabled = false; }
+    return true;
+  }
+  return false;
 }
 
 const oracleCls = {ok: "s-ok", error: "s-error", blocked: "s-needs_you", robots: "s-needs_you", empty: "s-needs_you"};
@@ -574,6 +621,7 @@ async function route() {
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === (tab === "job" ? "jobs" : tab === "task" ? "code" : tab === "doc" ? "vault" : tab || "ask")));
   try {
     if (tab === "job" && id) {
+      if (document.querySelector(".pinbox select")) { pollTimer = setTimeout(route, 2000); return; }  // user is pinning: do not wipe the chooser
       const j = await viewJob(id);
       if (!["done", "error", "cancelled"].includes(j.status)) pollTimer = setTimeout(route, 2000);
     } else if (tab === "task" && id) {

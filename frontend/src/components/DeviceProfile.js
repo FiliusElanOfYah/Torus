@@ -27,7 +27,7 @@ const FIELDS = [
     key: "default_llm",
     label: "Default LLM",
     type: "select",
-    options: ["sonnet-4.5", "sonnet-5", "opus-tier"],
+    options: ["sonnet", "opus", "haiku"],
   },
 ];
 
@@ -48,7 +48,7 @@ export default function DeviceProfile({ initial, onSaved }) {
       acode_installed: false,
       termux_boot_installed: false,
       vault_location: "internal",
-      default_llm: "sonnet-4.5",
+      default_llm: "sonnet",
       opus_for_code: true,
       jev_gating: true,
     }

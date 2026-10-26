@@ -108,7 +108,7 @@ class TestSessions:
                 "acode_installed": True,
                 "termux_boot_installed": True,
                 "vault_location": "internal",
-                "default_llm": "sonnet-4.5",
+                "default_llm": "sonnet",
                 "opus_for_code": True,
                 "jev_gating": True,
             }
