@@ -72,7 +72,7 @@ main() {
    torus llm verify            # point sonnet / opus / haiku at the model ids your key can use
    torus llm on && torus llm test
 
-   torus seal && torus audit   # post-quantum seal + 13 OPSEC checks (expect 0 FAIL)
+   torus seal && torus audit   # post-quantum seal + 14 OPSEC checks (expect 0 FAIL)
    torus open                  # the phone page: Ask / Jobs / Code / Vault / Settings
 
 Reboot once so Termux:Boot starts the mesh by itself. Full guide: ~/.torus/src/torus/INSTALL.md

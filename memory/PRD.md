@@ -151,3 +151,12 @@ scripts, service unit files, and bootstrap artifacts for every phase (0 → 9).
 - Topic alerts: oracled hashes each seed's text; results carry hash/changed, topics changed/changed_at, digest marks changed seeds and says "N changed since the last refill"; Vault tab shows an amber "N new" pill until the topic row is expanded (localStorage torus_oracle_seen); "Read digest" opens the digest in the reader. `torus oracle` prints "(changed)".
 - Tests: backend/tests/test_torus_models_docs.py 19/19 + testing-agent test_torus_iter9_t1.py 20/20; all torus suites green (iteration 9). Fixed after review: link colour in the reader, long URLs wrapping, settings atomic validation, family check on tier ids, dotfiles in counts, fix flag as string, ordered Sources list, bigger cite tap targets, bytes under 1 KB, stale "model id in use".
 - fake_llm.py answers torus.llm.models with a canned list; `FAKE_LLM=1 run_local_mesh.sh start` swaps it in for llmd.
+
+### 2026-06 (fork) · Cloudflare AI Gateway option (phone-only)
+- Decision (user, after honest trade-off): skip Perplexity and the platform "Claude integration" (TORUS already calls Anthropic directly with the user's key; Universal Key would not run on Termux). Add Cloudflare AI Gateway as an optional proxy instead.
+- torus_common.llm_settings: cf_account/cf_gateway from llm.toggle + `api_base` (cf_api_base → gateway.ai.cloudflare.com/v1/<acct>/<gw>/anthropic/v1, else api.anthropic.com/v1). llmd posts /messages to api_base and adds `cf-aig-authorization: Bearer <cloudflare key>` when the gateway is on and a cloudflare key is stored; /v1/models stays direct. airgapd ALLOWED += cloudflare.
+- CLI: `torus key set|rm|status cloudflare`; `torus llm gateway <account_id> <gateway_name> | off | status` (input validated to [A-Za-z0-9_-]).
+- Audit: extra-4 "Claude traffic path" → pass when direct, WARN when gateway on (14 checks now; INSTALL.md/bootstrap.sh counts updated).
+- Docs: INSTALL.md Step 7b (setup, honest benefits/costs, "Spending less on Claude"); README commands.
+- Tests: backend/tests/test_torus_cf_gateway.py 9/9 (unit + CLI); llmd URL/header path smoke-checked with a mocked client. Local mesh not available in this fork (no /tmp/tv venv or nats-server); mesh suites not re-run.
+- Support answers given: user's Cloudflare `cfut_` token is NOT an Anthropic key (cause of the 400 on /v1/models); needs sk-ant-api03- key from console.anthropic.com; told to rotate the pasted token.

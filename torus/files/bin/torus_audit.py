@@ -18,7 +18,7 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import torus_seal  # noqa: E402
 from torus_common import (AIRGAP, AIRGAP_SOCK, ETC, HOME, INDEX_DB, LLM_TOGGLE, LOGS, VAR, VAULT,  # noqa: E402
-                          append_jsonl, atomic_write, llm_settings, read_conf, write_conf)
+                          append_jsonl, atomic_write, key_present, llm_settings, read_conf, write_conf)
 
 HARDENING = ETC / "hardening.conf"
 BOOT = Path.home() / ".termux" / "boot" / "00-torus-start"
@@ -247,6 +247,15 @@ def check_gateway_host():
     return "fail", f"gatewayd answered a foreign Host header with {head.split(chr(13))[0]}", "torus install 6"
 
 
+def check_cf_gateway():
+    st = llm_settings()
+    if not (st["cf_account"] and st["cf_gateway"]):
+        return "pass", "Claude calls go straight to api.anthropic.com (no third party in the path)", ""
+    tok = "token stored" if key_present("cloudflare") else "no cloudflare token (fine for an unauthenticated gateway)"
+    return ("warn", f"Cloudflare AI Gateway {st['cf_gateway']} is in the path: prompts and answers transit Cloudflare; {tok}",
+            "turn OFF 'log request/response body' in the gateway settings, or: torus llm gateway off")
+
+
 def check_crlf():
     bad = [p.name for p in (HOME / "bin").glob("*.py") if b"\r" in p.read_bytes()]
     if bad:
@@ -268,6 +277,7 @@ CHECKS = [
     ("extra-1", "Gateway token is mode 600", check_gateway_token),
     ("extra-2", "Gateway rejects foreign Host headers", check_gateway_host),
     ("extra-3", "No CRLF line endings in daemons", check_crlf),
+    ("extra-4", "Claude traffic path (Cloudflare AI Gateway on/off)", check_cf_gateway),
 ]
 
 

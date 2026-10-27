@@ -17,7 +17,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import httpx  # noqa: E402
-from torus_common import LOGS, append_jsonl, get_secret, llm_settings, log, pack, resolve_model, run_daemon  # noqa: E402
+from torus_common import LOGS, append_jsonl, get_secret, key_present, llm_settings, log, pack, resolve_model, run_daemon  # noqa: E402
 
 NAME = "llmd"
 API = "https://api.anthropic.com/v1"
@@ -30,8 +30,11 @@ async def on_start(nc):
     client = httpx.AsyncClient(timeout=httpx.Timeout(300, connect=15))
 
 
-def headers(key):
-    return {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+def headers(key, cf_token=""):
+    h = {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}
+    if cf_token:  # Cloudflare "authenticated gateway" token; the Anthropic key above still does the paying
+        h["cf-aig-authorization"] = f"Bearer {cf_token}"
+    return h
 
 
 async def call_claude(req):
@@ -39,6 +42,9 @@ async def call_claude(req):
     if not s["enabled"]:
         return {"ok": False, "error": "LLM is off. Turn it on with: torus llm on"}
     key = await get_secret("anthropic")
+    cf_token = ""
+    if s["cf_account"] and key_present("cloudflare"):
+        cf_token = await get_secret("cloudflare")
     model = resolve_model(req["model"]) if req.get("model") else s["model_id"]
     messages = req.get("messages") or [{"role": "user", "content": req.get("prompt") or ""}]
     body = {"model": model, "max_tokens": int(req.get("max_tokens") or s["max_tokens"]), "messages": messages}
@@ -48,7 +54,7 @@ async def call_claude(req):
     for attempt in range(6):
         wait = min(60, 2 ** attempt * 2)
         try:
-            r = await client.post(f"{API}/messages", json=body, headers=headers(key))
+            r = await client.post(f"{s['api_base']}/messages", json=body, headers=headers(key, cf_token))
         except httpx.HTTPError as e:
             err = f"{e.__class__.__name__}: {e}"
         else:

@@ -36,4 +36,5 @@ Step-by-step details, what every phase does and how to undo: **[`torus/INSTALL.m
 torus ask "question" [url ...]   torus status      torus doctor       torus logs <daemon>
 torus oracle                     torus code        torus export       torus update
 torus llm on|off|verify|auto     torus seal        torus audit        torus rollback
+torus llm gateway <acct> <name>  torus key set anthropic|brave|cloudflare
 ```

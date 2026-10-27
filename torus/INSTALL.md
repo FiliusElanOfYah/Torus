@@ -91,6 +91,38 @@ torus search mode both
 Key: https://api-dashboard.search.brave.com. Modes: `urls` (only what you paste),
 `brave` (search only), `both`. You can also switch it per question on the web page.
 
+## Step 7b (optional): Cloudflare AI Gateway
+
+Puts Cloudflare's free proxy between TORUS and Anthropic. **Your Anthropic key still does the
+paying.** You gain: a spend dashboard (every call, model, tokens, cost), caching (an identical
+prompt sent again costs $0), and rate/budget caps so a runaway loop cannot drain your balance.
+You give up: prompts and answers transit Cloudflare (+30-80 ms), so `torus audit` shows a
+**WARN** on check *extra-4* while it is on. Honest default: skip it until you want the dashboard.
+
+1. Cloudflare dashboard -> **AI** -> **AI Gateway** -> **Create** (e.g. name `torus`).
+   Note your **Account ID** (dashboard URL or the gateway's "API endpoint") and the gateway name.
+   In the gateway settings turn **off** "log request/response body" if you want privacy;
+   turn **on** "Authenticated Gateway" if you want it to refuse calls without a token.
+2. In Termux:
+   ```
+   torus llm gateway <account_id> torus      # route Claude calls through the gateway
+   torus key set cloudflare                  # only if "Authenticated Gateway" is on (token needs AI Gateway: Run)
+   torus llm test                            # one real call; it now shows up in the Cloudflare dashboard
+   torus llm gateway status | off            # see it, or go straight to Anthropic again
+   ```
+`torus llm verify` (the model list) always goes directly to Anthropic; only message calls use
+the gateway. `torus llm off` still stops all Claude spend instantly.
+
+### Spending less on Claude
+
+- `torus llm auto on` (Haiku for short follow-ups, ~12x cheaper than Sonnet).
+- Pinned topics are the silent spender: `oracled` refreshes every pin **hourly**. Pin few, or
+  `torus oracle every 360` (6 h). `torus oracle off` pauses it.
+- `torus llm off` whenever you do not need Claude: fetch, parse, index, vault and coder all work
+  offline for free.
+- Short, specific questions with URLs: TORUS summarises locally first and sends only the digest.
+- With the gateway on: enable caching and set a daily request cap in its settings.
+
 ## Step 8: Use it
 
 ```
@@ -189,10 +221,10 @@ torus install 8
   whose file no longer matches the seal. `torus seal verify` prints the key
   fingerprint; write it on paper and compare now and then. `torus install` and
   `torus key set` re-seal by themselves.
-- **Audit**: `torus audit` runs 13 checks (F-Droid build, no port on 0.0.0.0,
+- **Audit**: `torus audit` runs 14 checks (F-Droid build, no port on 0.0.0.0,
   key file modes, no key in logs, seal, log rotation, storage scope, Termux:Boot,
-  package list, Claude off at boot, gateway token, Host-header guard, CRLF).
-  Every FAIL names the fix. The same list is on the web page under **Settings**.
+  package list, Claude off at boot, gateway token, Host-header guard, CRLF,
+  Claude traffic path). Every FAIL names the fix. The same list is on the web page under **Settings**.
 - **At boot**: Claude is switched off and rotated logs older than 7 days are
   deleted. Both switches live in `~/.torus/etc/hardening.conf`.
 

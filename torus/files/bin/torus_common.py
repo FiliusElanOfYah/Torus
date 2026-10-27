@@ -87,7 +87,19 @@ def llm_settings():
         "max_tokens": int(c.get("max_tokens") or 4096),
         # auto_route=true: short follow-ups without new URLs go to Haiku (cheap); full answers keep the default tier
         "auto_route": truthy(c.get("auto_route", "false")),
+        # Cloudflare AI Gateway (optional): torus llm gateway <account_id> <gateway_name>. Messages go via
+        # gateway.ai.cloudflare.com (logs, cache, caps); the Anthropic key still pays. Model list stays direct.
+        "cf_account": (c.get("cf_account") or "").strip(),
+        "cf_gateway": (c.get("cf_gateway") or "").strip(),
+        "api_base": cf_api_base(c.get("cf_account"), c.get("cf_gateway")),
     }
+
+
+def cf_api_base(account, gateway):
+    account, gateway = (account or "").strip(), (gateway or "").strip()
+    if account and gateway:
+        return f"https://gateway.ai.cloudflare.com/v1/{account}/{gateway}/anthropic/v1"
+    return "https://api.anthropic.com/v1"
 
 
 def search_settings():

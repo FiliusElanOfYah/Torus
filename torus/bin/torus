@@ -213,7 +213,7 @@ cmd_key() {
   local action="${1:-status}" name="${2:-}" k
   case "$action" in
     set)
-      case "$name" in anthropic|brave) ;; *) die "usage: torus key set anthropic|brave" ;; esac
+      case "$name" in anthropic|brave|cloudflare) ;; *) die "usage: torus key set anthropic|brave|cloudflare" ;; esac
       mkdir -p "$TORUS_HOME/airgap"; chmod 700 "$TORUS_HOME/airgap"
       printf 'Paste your %s key (hidden), then press Enter: ' "$name"
       IFS= read -rs k; echo
@@ -228,14 +228,14 @@ cmd_key() {
       rm -f "$TORUS_HOME/airgap/$name.key" && ok "$name key removed"
       reseal ;;
     status)
-      for k in anthropic brave; do
+      for k in anthropic brave cloudflare; do
         f="$TORUS_HOME/airgap/$k.key"
         if [ -f "$f" ]; then
           m="$(stat -c %a "$f" 2>/dev/null)"
           [ "$m" = 600 ] && ok "$k key stored (600)" || warn "$k key has mode $m. Fix with: chmod 600 $f"
         else info "$k key not set (torus key set $k)"; fi
       done ;;
-    *) die "usage: torus key set|rm|status <anthropic|brave>" ;;
+    *) die "usage: torus key set|rm|status <anthropic|brave|cloudflare>" ;;
   esac
 }
 
@@ -249,8 +249,19 @@ cmd_llm() {
     models) ctl models ;;
     verify) shift; ctl verify "$@" ;;
     auto) case "${2:-}" in on) ctl conf llm auto_route=true ;; off) ctl conf llm auto_route=false ;; *) die "usage: torus llm auto on|off   (Haiku for short follow-ups)" ;; esac ;;
+    gateway)
+      # Cloudflare AI Gateway: dashboard -> AI -> AI Gateway -> Create. Needs Account ID + gateway name.
+      case "${2:-status}" in
+        off) ctl conf llm cf_account= cf_gateway=; ok "Claude calls go straight to api.anthropic.com again" ;;
+        status) ctl conf llm | grep -E '^cf_' || info "gateway off (torus llm gateway <account_id> <gateway_name>)" ;;
+        *) [ -n "${3:-}" ] || die "usage: torus llm gateway <account_id> <gateway_name> | off | status"
+           case "$2$3" in *[!A-Za-z0-9_-]*) die "account id and gateway name: letters, digits, - and _ only" ;; esac
+           ctl conf llm "cf_account=$2" "cf_gateway=$3"
+           ok "Claude calls now go via gateway.ai.cloudflare.com/v1/$2/$3/anthropic (your Anthropic key still pays)"
+           info "authenticated gateway? store its token too:  torus key set cloudflare" ;;
+      esac ;;
     status) ctl conf llm ;;
-    *) die "usage: torus llm on|off|status|test|models|verify [--check-only]|auto on|off|model <sonnet|opus|haiku>|id <tier> <id>" ;;
+    *) die "usage: torus llm on|off|status|test|models|verify [--check-only]|auto on|off|gateway <acct> <name>|off|model <sonnet|opus|haiku>|id <tier> <id>" ;;
   esac
 }
 
