@@ -17,7 +17,7 @@ Claude as an opt-in, sealed top layer. Two parts live in this repo:
    pkg update -y && pkg install -y curl
    curl -fsSL https://raw.githubusercontent.com/FiliusElanOfYah/Torus/main/torus/bootstrap.sh | bash
    ```
-   That one line downloads TORUS, installs Phases 0-9 and prints the status. Run it again any
+   That one line downloads TORUS, installs Phases 0-10 and prints the status. Run it again any
    time to update or repair.
 3. Connect Claude with your own key:
    ```
@@ -38,4 +38,5 @@ torus oracle                     torus code        torus export       torus upda
 torus llm on|off|verify|auto     torus seal        torus audit        torus rollback
 torus llm gateway <acct> <name>  torus key set anthropic|brave|cloudflare
 torus llm cap <usd>|off          torus llm spend
+torus op "task"                  torus op list|show|yes|no|stop|undo <id> [phase]   (Operator, torus install 10)
 ```

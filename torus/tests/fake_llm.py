@@ -14,7 +14,19 @@ async def main():
     async def on(msg):
         req = json.loads(msg.data)
         prompt = req.get("prompt") or json.dumps(req.get("messages"))
-        if "<<<FILE" in (req.get("system") or ""):
+        system = req.get("system") or ""
+        if "TORUS Operator, planning" in system:
+            text = json.dumps({"phases": [{"title": "Look around", "reads": ["the working folder"], "changes": [], "runs": ["ls -la"]},
+                                          {"title": "Write a note", "reads": [], "changes": ["op-note.txt"], "runs": ["cat op-note.txt", "rm -rf nothing"]}],
+                               "estimate_usd": 0.02, "notes": "stub plan from fake_llm"})
+        elif "TORUS Operator executing phase 1" in system:
+            text = json.dumps({"phase_done": True, "summary": "Looked around (stub)."}) if "### ls -la" in prompt else \
+                json.dumps({"say": "listing the folder", "actions": [{"tool": "shell", "cmd": "ls -la"}]})
+        elif "TORUS Operator executing phase 2" in system:
+            text = json.dumps({"phase_done": True, "summary": "Wrote op-note.txt (stub)."}) if "### write" in prompt else \
+                json.dumps({"say": "writing the note", "actions": [{"tool": "write", "path": "op-note.txt", "content": "hello from the operator\n"},
+                                                                    {"tool": "shell", "cmd": "rm -rf nothing"}]})
+        elif "<<<FILE" in system:
             if "failed with exit code" in prompt:
                 text = ("Plan: fix the NameError by defining name.\n\n<<<FILE hello.py>>>\n"
                         "name = 'TORUS'\nprint(f'hello from {name}')\n<<<END>>>\n")

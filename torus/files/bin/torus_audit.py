@@ -256,6 +256,18 @@ def check_cf_gateway():
             "turn OFF 'log request/response body' in the gateway settings, or: torus llm gateway off")
 
 
+def check_operator():
+    conf = read_conf(ETC / "operator.conf")
+    if not (ETC / "operator.conf").exists():
+        return "skip", "phase 10 (Operator) not installed", "torus install 10"
+    snap = VAR / "operator" / "snapshots"
+    if snap.exists() and mode(snap) & 0o077:
+        return "fail", f"operator snapshots folder mode {mode(snap):o} (holds copies of files the agent changed)", f"chmod 700 {snap}"
+    strict = str(conf.get("ask_every_change", "false")).lower() in ("1", "true", "yes", "on")
+    how = "every change waits for a tap" if strict else "hybrid: reads alone, in-plan changes with a summary, danger list asks"
+    return "pass", f"Operator: keys/seal/gateway.token unreadable to the agent; snapshots mode 700; {how}", ""
+
+
 def check_crlf():
     bad = [p.name for p in (HOME / "bin").glob("*.py") if b"\r" in p.read_bytes()]
     if bad:
@@ -278,6 +290,7 @@ CHECKS = [
     ("extra-2", "Gateway rejects foreign Host headers", check_gateway_host),
     ("extra-3", "No CRLF line endings in daemons", check_crlf),
     ("extra-4", "Claude traffic path (Cloudflare AI Gateway on/off)", check_cf_gateway),
+    ("extra-5", "Operator reach and approval mode", check_operator),
 ]
 
 

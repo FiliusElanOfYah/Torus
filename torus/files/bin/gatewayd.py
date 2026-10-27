@@ -51,7 +51,7 @@ MAX_SRC_CHARS = 14_000
 MAX_SOURCES = 10
 MAX_TOTAL_SOURCES = 20
 SERVICES = ["nats-server", "torus-mongo", "fetcherd", "parserd", "indexerd", "vaultd",
-            "summarizerd", "airgapd", "sentineld", "llmd", "gatewayd", "coderd", "oracled"]
+            "summarizerd", "airgapd", "sentineld", "llmd", "gatewayd", "coderd", "oracled", "operatord"]
 ACTIVE = {"queued", "searching", "fetching", "needs_you", "thinking"}
 SYSTEM = ("You are TORUS, a careful research assistant running for one person on their phone. "
           "Answer the question using the numbered sources. Cite every factual claim with [n]. "
@@ -482,7 +482,8 @@ def settings_payload():
             "keys": {"anthropic": key_present("anthropic"), "brave": key_present("brave"), "cloudflare": key_present("cloudflare")},
             "cf_account": llm["cf_account"], "cf_gateway": llm["cf_gateway"], "cf_enabled": bool(llm["cf_account"] and llm["cf_gateway"]),
             "cf_saved_account": c.get("cf_saved_account", ""), "cf_saved_gateway": c.get("cf_saved_gateway", ""),
-            "daily_cap_usd": torus_spend.daily_cap()}
+            "daily_cap_usd": torus_spend.daily_cap(),
+            "op_ask_every_change": truthy(read_conf(ETC / "operator.conf").get("ask_every_change", "false"))}
 
 
 CF_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -533,6 +534,10 @@ async def api_settings(body):
         write_conf(LLM_TOGGLE, {"auto_route": "true" if body["auto_route"] is True else "false"})
     if "daily_cap_usd" in body:
         write_conf(LLM_TOGGLE, {"daily_cap_usd": body["daily_cap_usd"] or ""})
+    if "op_ask_every_change" in body:
+        if not isinstance(body["op_ask_every_change"], bool):
+            return err(400, "op_ask_every_change must be true or false")
+        write_conf(ETC / "operator.conf", {"ask_every_change": "true" if body["op_ask_every_change"] else "false"})
     if cf is not None:
         write_conf(LLM_TOGGLE, cf)
     if "model" in body:
@@ -559,6 +564,31 @@ async def api_audit(method):
     if method == "POST":
         return 200, await asyncio.to_thread(torus_audit.run_audit)
     return 200, torus_audit.last_audit() or {"ok": None, "counts": {}, "items": [], "when": ""}
+
+
+async def api_op(method, path, body):
+    """Operator (phase 10): GET /api/op, POST /api/op {task,...}, GET /api/op/<id>, POST /api/op/<id>/<action>."""
+    m = re.fullmatch(r"/api/op(?:/([0-9A-Za-z-]+)(?:/(approve_plan|approve|deny|stop|resume|undo))?)?", path)
+    if not m:
+        return err(404, "not found")
+    tid, action = m.group(1), m.group(2)
+    try:
+        if not tid:
+            if method == "POST":
+                res = await nreq("torus.op.create", body or {}, 20)
+            else:
+                res = await nreq("torus.op.list", {}, 10)
+        elif action:
+            if method != "POST":
+                return err(405, "POST")
+            res = await nreq("torus.op.action", {**(body or {}), "id": tid, "action": action}, 30)
+        else:
+            res = await nreq("torus.op.get", {"id": tid}, 10)
+    except Exception as e:
+        return err(503, f"operatord did not answer ({e.__class__.__name__}): torus install 10  /  torus status")
+    if not res.get("ok"):
+        return err(400, res.get("error") or "operator refused")
+    return 200, res
 
 
 def audit_failures():
@@ -843,6 +873,10 @@ async def route(method, path, query, body, headers=None):
         if not secrets.compare_digest((headers or {}).get("x-torus-token", ""), STATE["token"]):
             return err(401, "Code needs your TORUS token. Open the page from Termux with: torus open")
         return await gateway_code.route(method, path, query, body)
+    if path.startswith("/api/op"):
+        if not secrets.compare_digest((headers or {}).get("x-torus-token", ""), STATE["token"]):
+            return err(401, "Operator needs your TORUS token. Open the page from Termux with: torus open")
+        return await api_op(method, path, body)
     if path == "/api/health":
         nc = STATE["nc"]
         return 200, {"ok": True, "nats": bool(nc and nc.is_connected), "jobs": len(jobs), "running": len(tasks),

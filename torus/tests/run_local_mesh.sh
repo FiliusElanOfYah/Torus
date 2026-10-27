@@ -6,7 +6,7 @@ T="${TORUS_HOME:-/tmp/torus-test}"
 PY="${TORUS_PY:-/tmp/tv/bin/python}"
 SRC="$(cd "$(dirname "$0")/.." && pwd)/files"
 export TORUS_HOME="$T"
-DAEMONS="fetcherd parserd indexerd vaultd summarizerd airgapd sentineld llmd gatewayd coderd oracled"
+DAEMONS="fetcherd parserd indexerd vaultd summarizerd airgapd sentineld llmd gatewayd coderd oracled operatord"
 case "${1:-start}" in
   start)
     mkdir -p "$T"/{bin,etc,logs,var,web,vault/inbox,vault/answers,vault/topics,airgap}
@@ -16,6 +16,7 @@ case "${1:-start}" in
     [ -f "$T/etc/hardening.conf" ] || cp "$SRC/etc/hardening.conf" "$T/etc/"
     [ -f "$T/etc/pinned.yaml" ] || cp "$SRC/etc/pinned.yaml" "$T/etc/"
     [ -f "$T/etc/oracle.conf" ] || cp "$SRC/etc/oracle.conf" "$T/etc/"
+    [ -f "$T/etc/operator.conf" ] || cp "$SRC/etc/operator.conf" "$T/etc/"
     [ -f "$T/etc/coder.conf" ] || printf 'root=%s/projects\nrun_timeout=60\n' "$T" > "$T/etc/coder.conf"
     pgrep -f "nats-server -a 127.0.0.1" >/dev/null || setsid nohup nats-server -a 127.0.0.1 -p 4222 >"$T/logs/nats.log" 2>&1 </dev/null &
     sleep 1

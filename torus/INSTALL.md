@@ -236,10 +236,10 @@ torus install 8
   whose file no longer matches the seal. `torus seal verify` prints the key
   fingerprint; write it on paper and compare now and then. `torus install` and
   `torus key set` re-seal by themselves.
-- **Audit**: `torus audit` runs 14 checks (F-Droid build, no port on 0.0.0.0,
+- **Audit**: `torus audit` runs 15 checks (F-Droid build, no port on 0.0.0.0,
   key file modes, no key in logs, seal, log rotation, storage scope, Termux:Boot,
   package list, Claude off at boot, gateway token, Host-header guard, CRLF,
-  Claude traffic path). Every FAIL names the fix. The same list is on the web page under **Settings**.
+  Claude traffic path, Operator reach). Every FAIL names the fix. The same list is on the web page under **Settings**.
 - **At boot**: Claude is switched off and rotated logs older than 7 days are
   deleted. Both switches live in `~/.torus/etc/hardening.conf`.
 
@@ -260,6 +260,59 @@ from Step 2, then `torus restore ~/storage/downloads/torus-<date>.tar.gz`
 (hash and signature are checked, overwritten files are backed up), then
 `torus install all`, `torus seal`, `torus audit`. The full list is in
 `~/.torus/docs/RESTORE.md` and inside every export.
+
+## Step 12: Operator (Claude works inside Termux, you approve)
+
+```
+torus install 10
+torus op "list the five biggest folders under ~/storage/downloads"
+```
+Also install **Termux:API** from F-Droid (same source as Termux) for the phone tools.
+
+**What it is.** A task is anything you could do yourself in Termux: "analyse the CSVs in Downloads
+and chart the monthly totals", "add a retry to fetcherd", "update all packages and re-run the
+audit". Claude answers with a **plan** (phases: what it will read, change, run, which phone
+features, rough cost). Nothing happens until you **Approve** (budget editable, default $1;
+"pause between phases" and "tap for every change" optional). Then the phases run one after
+another on the **Operator** tab (or `torus op` follows in the terminal).
+
+**Approvals.**
+- *Reads* (files, folders, logs, `git status`, inspection commands) run by themselves.
+- *Changes inside the plan* (file writes, installs, commits, other commands) run without extra
+  taps; every phase ends with a summary and the diff.
+- *Danger list* — always a tap, every time: deleting files or folders, `pkg/pip uninstall`,
+  force-push, `git reset --hard`, stopping or reinstalling TORUS services, anything naming keys
+  or the seal, world-writable chmod, piping downloads into a shell, root, writes outside the
+  Termux home / shared storage, commands whose program is not in the approved plan, SMS,
+  camera, microphone.
+- Settings → *Operator: tap for every change* (or `torus op strict on`) makes every change ask.
+
+**Reach.** The agent is the Termux user: the real PATH and environment, every file under the
+Termux home and shared storage, pkg/pip, git, TORUS's own commands. No root, so Android itself,
+system settings and other apps' private data are out of reach. `~/.torus/airgap` (keys, seal),
+`gateway.token` and the snapshot folder are unreadable to it, and every tool output passes
+through sentineld's redaction before Claude sees it.
+
+**Phone tools** (Termux:API): clipboard in/out, finish notification, battery / Wi-Fi / device
+info, open a result in another app, camera photo, microphone recording, SMS send/read,
+location, contacts. Android asks for each permission the first time it is used; a denied
+permission switches that tool off for the task (allow it later under Android Settings → Apps →
+Termux:API → Permissions). Camera, microphone and SMS-send always ask you first as well.
+
+**Undo.** Files the agent writes or deletes are copied first (snapshots, 24 h, up to 50 MB each)
+so **Undo phase** restores them in one tap once the task is stopped or done. Files changed by
+shell commands are listed on the phase but cannot be restored — the agent is told to edit
+through the write tool for that reason.
+
+**Cost.** Per-task budget (default $1, `torus op budget 2`), the daily cap (`torus llm cap`) and
+Sonnet by default (Opus/Haiku selectable). Outputs are trimmed to 6 000 characters before they
+reach Claude. The task stops with a summary when a limit is reached.
+
+**Honest limits.** Background work survives screen-off only while Termux holds its wake lock
+(TORUS takes it for the task; `termux-wake-lock`). Camera and microphone are single shots, not
+streams. Finished tasks become dossiers in Vault → Answers (plan, log, diffs, summaries).
+
+`torus op list | show <id> | follow <id> | yes <id> | no <id> | stop <id> | resume <id> | undo <id> <phase>`.
 
 ---
 
@@ -295,3 +348,4 @@ from editors are stripped automatically. `torus files` shows what differs.
 | 7 | coder: write, run and fix code in your projects; oracled: refills pinned topics on a schedule (`torus oracle`) | coderd, oracled |
 | 8 | hardening: ML-DSA-65 seal, `torus audit`, Claude off at boot, log pruning | none |
 | 9 | backup: `torus export` / `torus restore` (signed tarball) | none |
+| 10 | Operator: Claude plans, you approve, it reads/edits/runs/installs inside Termux with undo per phase; Termux:API phone tools (`torus op`) | operatord |

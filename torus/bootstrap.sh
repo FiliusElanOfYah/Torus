@@ -5,7 +5,7 @@
 #
 # What it does, in order:
 #   1. downloads (or updates) the TORUS source into ~/.torus/src and links the `torus` command
-#   2. runs `torus install all`  - Phases 0-9: packages, NATS, Mongo, every daemon, web page, seal, export
+#   2. runs `torus install all`  - Phases 0-10: packages, NATS, Mongo, every daemon, web page, seal, export, operator
 #   3. prints `torus status` and the three commands that connect Claude
 # Only download + link, no install:   TORUS_NO_INSTALL=1 bash bootstrap.sh
 set -eu
@@ -72,7 +72,7 @@ main() {
    torus llm verify            # point sonnet / opus / haiku at the model ids your key can use
    torus llm on && torus llm test
 
-   torus seal && torus audit   # post-quantum seal + 14 OPSEC checks (expect 0 FAIL)
+   torus seal && torus audit   # post-quantum seal + 15 OPSEC checks (expect 0 FAIL)
    torus open                  # the phone page: Ask / Jobs / Code / Vault / Settings
 
 Reboot once so Termux:Boot starts the mesh by itself. Full guide: ~/.torus/src/torus/INSTALL.md

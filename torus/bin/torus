@@ -9,8 +9,8 @@ LIB="$TORUS_SRC/torus/lib/common.sh"
 # shellcheck source=../lib/common.sh
 . "$LIB"
 CTL="$TORUS_HOME/bin/torusctl.py"
-ALL_SERVICES="nats-server torus-mongo fetcherd parserd indexerd vaultd summarizerd airgapd sentineld llmd gatewayd coderd oracled"
-PHASES="0 1 2 3 4 5 6 7 8 9"
+ALL_SERVICES="nats-server torus-mongo fetcherd parserd indexerd vaultd summarizerd airgapd sentineld llmd gatewayd coderd oracled operatord"
+PHASES="0 1 2 3 4 5 6 7 8 9 10"
 
 usage() {
 cat <<'EOF'
@@ -83,8 +83,8 @@ cmd_install() {
     case "$a" in
       --force) TORUS_FORCE=1 ;;
       all) list="$PHASES" ;;
-      [0-9]) list="$list $a" ;;
-      *) die "unknown phase '$a' (use 0-9 or all)" ;;
+      [0-9]|10) list="$list $a" ;;
+      *) die "unknown phase '$a' (use 0-10 or all)" ;;
     esac
   done
   [ -n "$list" ] || die "which phase? e.g. torus install all"
@@ -279,6 +279,18 @@ cmd_llm() {
   esac
 }
 
+cmd_op() {
+  # torus op "task"            plan, approve, follow (Operator, phase 10)
+  # torus op list|show <id>|approve <id>|yes <id>|no <id>|stop <id>|resume <id>|undo <id> <phase>|strict on|off
+  case "${1:-}" in
+    '') die 'usage: torus op "task"   e.g. torus op "list the biggest folders in Downloads"' ;;
+    list|show|approve|yes|no|stop|resume|undo|follow) ctl op "$@" ;;
+    strict) case "${2:-}" in on) ctl conf operator ask_every_change=true ;; off) ctl conf operator ask_every_change=false ;; *) ctl conf operator ;; esac ;;
+    budget) [ -n "${2:-}" ] || die "usage: torus op budget <usd>"; ctl conf operator "default_budget_usd=$2" ;;
+    *) ctl op create "$*" ;;
+  esac
+}
+
 cmd_search() {
   case "${1:-status}" in
     mode) case "${2:-}" in urls|brave|both) ctl conf search "mode=$2" ;; *) die "usage: torus search mode urls|brave|both" ;; esac ;;
@@ -362,6 +374,7 @@ case "$cmd" in
   selftest) ctl selftest "$@" ;;
   key) cmd_key "$@" ;;
   llm) cmd_llm "$@" ;;
+  op) cmd_op "$@" ;;
   search) cmd_search "$@" ;;
   oracle) cmd_oracle "$@" ;;
   audit) cmd_audit "$@" ;;

@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 13 (Operator phase 10, spend meter/daily cap, Cloudflare AI Gateway). Tested against the live FAKE_LLM dev mesh on 127.0.0.1:7777 at 390x844. Requested pytest suite: 45/45 passed. New live E2E suite (backend/tests/test_torus_iter13_live_operator.py): 7/8 passed. It covers token 401, the full plan -> approve(pause) -> paused -> resume -> needs_you('rm -rf nothing') -> deny -> done flow, dossier, changed/diffs, undo (and a second undo -> 400), list, decline -> stopped, bad inputs, strict mode (write waits for a tap), /api/spend, cap 'lots' -> 400, and CF toggle save/remember. The one failure is a real bug: a request with a bad op_ask_every_change value returns 400 but has already saved the other fields (daily_cap_usd). Web UI: every requested flow works end to end. That covers #/op form, Plan -> #/optask/<id>, the approve card, op-bar with pending/Allow/Deny/Stop, Deny -> done, phase logs/summary/diff, op-undo-1 with confirm -> 'undone' and the file removed, op-dossier opening #/doc/..., Decline -> stopped ('plan declined'), per-task strict checkbox -> write waits -> Stop -> stopped ('stopped by you'), the Settings strict toggle writing operator.conf, the spend card, cap save/clear, the CF gateway flow (asks for ids, shows the gateway.ai.cloudflare.com path, remembers ids after Direct), the Ask spend meter, turn-cost on a job follow-up, and regression checks of the Ask/Jobs/Code/Vault tabs with 6 nav tabs. Bugs found: (1) HIGH safety: the operatord shell classifier marks several file-changing commands as 'read', so they run with no tap even in strict mode and Undo cannot restore them. (2) the dossier's doc-job-link goes to #/job/<op-id>, which shows 'no such job'. (3) the half-apply bug above. Not testable here: CLI `torus op` / `torus llm cap` through bin/torus (needs a real Termux install; torusctl `op` list works), real spend numbers (fake_llm replaces llmd, which writes llmd-usage.jsonl, so spend stays at 0 calls), and phone tools.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "operatord classify() / shell_segments() (Operator shell tool)", "issue": "These commands are classified 'read' even with strict=True, so they run automatically with no tap and no snapshot (Undo cannot restore them): `find . -delete`, `find . -exec rm {} +`, `sed -i 's/a/b/' f`, `sort -o f f`, `env rm important.txt`, `awk '{system(\"rm a\")}' f`, `ls $(rm a.txt)`, `ls `rm a.txt``, `ls & rm a.txt`, and a newline-separated 'ls\\nrm important.txt'. Root causes: READ_CMDS includes env/find/sed/awk/sort with no argument checks (-delete, -exec, -i, -o, system()); shell_segments splits only on ; && || | and not on newlines, single &, $( ) or backticks. This breaks the promise that 'tap for every change' makes every change ask. (rm -r/-rf with any of these separators is still caught by DANGER_RE.) Reference: /app/torus/files/bin/operatord.py:50-53, 201-202, 229-231, 248-258", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/settings", "issue": "op_ask_every_change is type-checked at line 538, after llm_enabled, auto_route and daily_cap_usd have already been written. {daily_cap_usd:7.5, op_ask_every_change:'yes'} returns 400 but the cap is saved as 7.5. That contradicts the 'validate everything first' comment at line 493. Move the check up into the validation block. llm_enabled is also never type-checked. Reference: /app/torus/files/bin/gatewayd.py:493-540"},
+      {"endpoint": "operatord manifest()", "issue": "Dead code: it is defined but never called. Reference: /app/torus/files/bin/operatord.py:321"}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Vault reader for an Operator dossier", "issue": "The 'open job <id>' link (doc-job-link) points to #/job/<operator task id>, which renders 'no such job' because Operator tasks are not jobs. For dossiers with engine operator:* it should link to #/optask/<id>.", "testID": "doc-job-link", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Top nav at 390px", "issues": ["With 6 tabs, the last letter of 'SETTINGS' is clipped at the right edge (nav-settings ends at x=388). The nav scrolls sideways but there is no visual hint that it does.", "Nav tabs are 39px tall, below the 44px touch-target minimum."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/backend/tests/test_torus_iter13_live_operator.py", "/app/test_reports/pytest/pytest_iter13.xml", "/app/test_reports/pytest/pytest_iter13_live.xml"],
+  "action_items": [
+    "HIGH: Harden the operatord shell classifier, keeping the existing DANGER_RE behaviour. Split segments on newlines and single '&' as well. Treat $( ) and backticks as non-read. Remove env/xargs-style wrappers from READ_CMDS or classify them by the wrapped command. Make find with -delete/-exec/-execdir/-ok, sed -i/--in-place, sort -o, and awk containing system( or > count as 'change' (or 'danger'), so strict mode asks and the hybrid mode at least shows a summary.",
+    "In gatewayd api_settings, move the op_ask_every_change bool check (and add an llm_enabled bool check) into the validate-first block so a 400 never leaves a half-applied request.",
+    "In the Vault doc view, when meta.engine starts with 'operator:', point doc-job-link to #/optask/<id> instead of #/job/<id>.",
+    "Optional: make the 6-tab nav fit at 390px (smaller padding/letter-spacing, or a fade showing it scrolls) and raise the tab height to 44px or more."
+  ],
+  "critical_code_review_comments": [
+    "Shell commands are not snapshotted, so Undo covers only the write/delete tools. This is documented in INSTALL.md:302-303, but because of the classifier gaps above, changes made by 'read' commands also skip the tap.",
+    "operatord.py is 792 lines, over the 700-line guideline. Consider splitting the classifier/tools from the task runner.",
+    "fake_llm replaces llmd, so llmd-usage.jsonl is never written in the dev mesh and /api/spend always shows 0 calls. The meter's display of non-zero values is checked only by the unit tests, not live."
+  ],
+  "updated_files": ["/app/backend/tests/test_torus_iter13_live_operator.py (new)"],
+  "success_rate": {"backend": "pytest 45/45 (requested); live 7/8 (half-apply bug); classifier safety probe found 10+ bypasses", "frontend": "~95%: all requested UI flows pass; 1 broken link (doc-job-link for Operator dossiers) plus minor nav clipping"},
+  "seed_data_creation": "Several Operator tasks (TEST and 'look around...', 'decline...') in /tmp/torus-test, one follow-up 'TEST_ follow up please' on job 20261027-112132-0e50. Settings reset: op strict off, daily cap empty, CF direct with no saved ids. /root/op-work is empty.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The dev mesh is plain Python/NATS (TORUS_HOME=/tmp/torus-test, venv /tmp/tv/bin/python; pytest runs with the system python and uses xdist by default). Token is in /tmp/torus-test/etc/gateway.token; send headers X-Torus-Token and X-Torus: 1. The live suite test_torus_iter13_live_operator.py toggles global settings and resets them; run it with -n0 to avoid races. bin/torus (the bash wrapper) refuses to run without a Termux install; torusctl.py can be called directly for `op`/`spend`. Op task ids look like YYYYMMDD-HHMMSS-xxxx. The container clock is Oct 2026.",
+  "rca_of_issue": "Classifier bypass: _readonly() checks only the first word of each segment against READ_CMDS, and shell_segments() uses re.split on ; && || | only. So anything after a newline/&/$( )/backticks, and destructive flags of 'read' programs (find -delete, sed -i, sort -o, env <cmd>, awk system()), are treated as read. Repro: python -c \"import operatord as o; print(o.classify({'tool':'shell','cmd':'find . -delete','_cwd':'/root/op-work'}, set(), True))\" -> ('read',''). Half-apply: gatewayd.py:537-540 validates and writes in the same step, after earlier writes. Doc link: the Vault reader builds #/job/${meta.job} for every doc, including Operator dossiers."
+}

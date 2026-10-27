@@ -14,7 +14,7 @@ header{position:sticky;top:0;background:var(--bg);border-bottom:1px solid var(--
 .dot{width:10px;height:10px;border-radius:50%;background:var(--red)}.dot.on{background:var(--green)}
 .meta{margin-left:auto;font:12px var(--mono);color:var(--dim);letter-spacing:0}
 nav{display:flex;gap:4px;margin-top:10px;overflow-x:auto}
-nav a{flex-shrink:0;padding:10px 14px;font:600 13px var(--mono);color:var(--dim);text-decoration:none;border-bottom:2px solid transparent;text-transform:uppercase;letter-spacing:.08em}
+nav a{flex-shrink:0;padding:10px 11px;font:600 12.5px var(--mono);color:var(--dim);text-decoration:none;border-bottom:2px solid transparent;text-transform:uppercase;letter-spacing:.05em}
 nav a.on{color:var(--amber);border-color:var(--amber)}
 nav a{position:relative}.badge{display:none;position:absolute;top:4px;right:2px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--amber);color:#111;font:700 10px/16px var(--mono);text-align:center;letter-spacing:0}.badge.on{display:inline-block}
 .pill.new{color:#111;background:var(--amber);border-color:var(--amber);font-size:11px;padding:1px 8px}
@@ -67,6 +67,7 @@ button:active{transform:scale(.98)}button:disabled{opacity:.5}
     <a href="#/ask" data-tab="ask" data-testid="nav-ask">Ask</a>
     <a href="#/jobs" data-tab="jobs" data-testid="nav-jobs">Jobs</a>
     <a href="#/code" data-tab="code" data-testid="nav-code">Code</a>
+    <a href="#/op" data-tab="op" data-testid="nav-op">Operator</a>
     <a href="#/vault" data-tab="vault" data-testid="nav-vault">Vault</a>
     <a href="#/settings" data-tab="settings" data-testid="nav-settings">Settings<span class="badge" id="audit-badge" data-testid="audit-badge" title="audit failures"></span></a>
   </nav>
@@ -558,7 +559,10 @@ async function viewSettings() {
     <label for="cap-usd">Daily cap (USD, 0 = none)</label>
     <div class="row"><input id="cap-usd" data-testid="settings-cap-input" type="number" inputmode="decimal" min="0" step="0.5" value="${s.daily_cap_usd || ""}" placeholder="e.g. 2" style="width:120px">
       <button id="cap-save" data-testid="settings-cap-save">Save cap</button></div>
-    <p class="hint">Once today's estimate reaches the cap, every Claude call (answers, follow-ups, Coder) is refused until local midnight and TORUS falls back to the local summary. Same as <code class="k">torus llm cap &lt;usd&gt;</code>. Pinned-topic refills never use Claude, so they are unaffected.</p></div>
+    <p class="hint">Once today's estimate reaches the cap, every Claude call (answers, follow-ups, Coder) is refused until local midnight and TORUS falls back to the local summary. Same as <code class="k">torus llm cap &lt;usd&gt;</code>. Pinned-topic refills never use Claude, so they are unaffected.</p>
+    <label>Operator: tap for every change</label>
+    <div class="seg" data-testid="settings-op-strict-toggle"><button data-opstrict="1" class="${s.op_ask_every_change?"on":""}" data-testid="settings-op-strict-on">On</button><button data-opstrict="0" class="${!s.op_ask_every_change?"on":""}" data-testid="settings-op-strict-off">Off</button></div>
+    <p class="hint">Off = the hybrid: reads run alone, in-plan changes run with a summary per phase, the danger list and off-plan steps always ask. On = every file write and every command that may change something waits for a tap. Same as <code class="k">torus op strict on|off</code>.</p></div>
   <div class="card" data-testid="settings-gateway"><label style="margin-top:0">Claude traffic path</label>
     <div class="seg" data-testid="settings-gateway-toggle"><button data-cf="0" class="${s.cf_enabled?"":"on"}" data-testid="settings-gateway-direct">Direct to Anthropic</button><button data-cf="1" class="${s.cf_enabled?"on":""}" data-testid="settings-gateway-cloudflare">Via Cloudflare gateway</button></div>
     <p class="hint" data-testid="settings-gateway-state">${s.cf_enabled
@@ -620,6 +624,7 @@ async function viewSettings() {
     const b = e.target.closest("button"); if (!b) return; let body = null;
     if (b.dataset.llm) body = {llm_enabled: b.dataset.llm === "1"};
     if (b.dataset.auto) body = {auto_route: b.dataset.auto === "1"};
+    if (b.dataset.opstrict) body = {op_ask_every_change: b.dataset.opstrict === "1"};
     if (b.dataset.cf) {
       body = {cf_enabled: b.dataset.cf === "1"};
       if (body.cf_enabled && !settings.cf_enabled) {
@@ -646,6 +651,85 @@ async function renderSpend() {
       ${sp.cap_hit ? `<p class="warn" data-testid="spend-cap-hit">Daily cap reached: Claude is paused until midnight. Raise the cap below to continue.</p>` : ""}
       <p class="hint">Estimates from Anthropic's list prices (${["sonnet","opus","haiku"].map(f => `${f} $${sp.prices[f + "_in"]}/$${sp.prices[f + "_out"]}`).join(", ")} per MTok). Correct them in <code class="k">${esc(sp.prices_path)}</code>; the bill at console.anthropic.com is the truth.</p>`;
   } catch (e) { el.innerHTML = `<p class="warn">${esc(e.message)}</p>`; }
+}
+
+// ---------------------------------------------------------------- Operator (phase 10)
+const opPill = s => ({planning: "fetching", plan_ready: "needs_you", running: "thinking", needs_you: "needs_you", paused: "needs_you", done: "done", stopped: "cancelled", error: "error", interrupted: "error"}[s] || s);
+const opWord = s => ({plan_ready: "Plan ready", needs_you: "Needs you", paused: "Paused"}[s] || s);
+const opOpen = new Set();
+const opLocked = e => /token/i.test(e.message) ? `<div class="card"><p class="warn" data-testid="op-locked">Operator is locked. In Termux run <code class="k">torus open</code> once. It unlocks this browser with your private token.</p></div>` : `<div class="card"><p class="warn" data-testid="view-error">${esc(e.message)}</p></div>`;
+
+async function viewOp() {
+  let r;
+  try { r = await api("/api/op"); } catch (e) { $("#view").innerHTML = opLocked(e); return; }
+  const s = r.settings;
+  $("#view").innerHTML = `
+  <div class="card"><label style="margin-top:0" for="op-task">New operator task</label>
+    <textarea id="op-task" data-testid="op-task-input" placeholder="e.g. analyse the CSVs in ~/storage/downloads and chart the monthly totals · add a retry to fetcherd · update all packages and re-run the audit"></textarea>
+    <div class="row" style="margin-top:8px"><select id="op-model" data-testid="op-model-select" style="width:auto"><option value="sonnet" ${s.model==="sonnet"?"selected":""}>Sonnet</option><option value="opus" ${s.model==="opus"?"selected":""}>Opus</option><option value="haiku" ${s.model==="haiku"?"selected":""}>Haiku</option></select>
+      <input id="op-budget" data-testid="op-budget-input" type="number" inputmode="decimal" min="0.05" step="0.25" value="${s.default_budget_usd}" style="width:110px" title="budget USD">
+      <button class="primary" id="op-plan" data-testid="op-plan-button">Plan</button></div>
+    <p class="hint">Claude plans first (what it will read, change, run and roughly cost); nothing happens until you approve. Reads run alone; in-plan changes run with a summary per phase; the danger list and anything off-plan always wait for a tap${s.ask_every_change ? " — <b>and every change too</b> (Settings)" : ""}. Working folder: <code class="k">${esc(s.cwd)}</code>.${r.termux_api ? "" : " Phone tools need Termux:API (F-Droid) + <code class=\"k\">pkg install termux-api</code>."}</p></div>
+  <div class="card" data-testid="op-list">${r.tasks.length ? r.tasks.map(t => `<a class="job" href="#/optask/${t.id}" data-testid="op-row"><span class="pill s-${opPill(t.status)}">${esc(opWord(t.status))}</span><div><b>${esc(t.task.slice(0, 120))}</b><div class="hint">${new Date(t.created*1000).toLocaleString()} · ${t.phases} phase(s) · ≈ ${fmtUsd(t.cost || 0)} · ${esc(t.model)}</div></div></a>`).join("") : `<p class="hint" data-testid="op-empty">No operator tasks yet.</p>`}</div>`;
+  $("#op-plan").onclick = async () => {
+    const task = $("#op-task").value.trim(); if (task.length < 3) return toast("Describe the task first");
+    $("#op-plan").disabled = true;
+    try { const r2 = await api("/api/op", {task, model: $("#op-model").value, budget_usd: $("#op-budget").value}); location.hash = "#/optask/" + r2.task.id; }
+    catch (e) { toast(e.message); $("#op-plan").disabled = false; }
+  };
+}
+
+function opPhaseCard(t, ph, i) {
+  const st = ph.status === "done" ? "done" : ph.status === "running" ? "thinking" : ph.status === "interrupted" ? "error" : "queued";
+  const log = t.log.filter(e => e._ph === i && e.kind !== "plan" && e.kind !== "summary" && e.kind !== "phase");
+  return `<details class="card" data-testid="op-phase-${i}" ${opOpen.has(i) || ph.status === "running" ? "open" : ""} data-i="${i}">
+    <summary style="cursor:pointer;list-style:none;display:flex;gap:10px;align-items:center"><span class="pill s-${st}">${i + 1}</span><b style="flex:1">${esc(ph.title)}</b><span class="hint">${ph.status}${ph.undone ? " · undone" : ""}</span></summary>
+    <p class="hint" style="margin:8px 0 0">${ph.reads.length ? `reads: ${esc(ph.reads.join("; "))}<br>` : ""}${ph.changes.length ? `changes: ${esc(ph.changes.join("; "))}<br>` : ""}${ph.runs.length ? `runs: <code class="k">${esc(ph.runs.join("; "))}</code><br>` : ""}${ph.phone.length ? `phone: ${esc(ph.phone.join(", "))}` : ""}</p>
+    ${log.length ? `<div class="out" data-testid="op-phase-log-${i}">${log.map(e => esc(e.kind === "cmd" ? "$ " + e.text : e.kind === "out" ? e.text : e.kind === "say" ? "· " + e.text : e.kind === "ask" ? "? " + e.text : e.kind === "tap" ? "✓ " + e.text : e.kind === "blocked" ? "x " + e.text : e.text)).join("\n")}</div>` : ""}
+    ${ph.summary ? `<div class="answer" data-testid="op-phase-summary-${i}" style="margin-top:8px">${md(ph.summary)}</div>` : ""}
+    ${(ph.diffs || []).map(d => `<p class="hint" style="margin:8px 0 2px">${esc(d.path)}</p>${diffHtml(d.diff)}`).join("")}
+    ${ph.shell_changed && ph.shell_changed.length ? `<p class="hint">Changed by commands (not undoable): ${esc(ph.shell_changed.slice(0, 20).join(", "))}${ph.shell_changed.length > 20 ? " …" : ""}</p>` : ""}
+    ${ph.status === "done" && ph.changed && ph.changed.length && !ph.undone && !["planning", "running", "needs_you"].includes(t.status) ? `<div class="row" style="margin-top:8px"><button data-act="undo" data-phase="${i}" data-testid="op-undo-${i}">Undo phase ${i + 1} (${ph.changed.length} file${ph.changed.length === 1 ? "" : "s"})</button></div>` : ""}
+  </details>`;
+}
+
+async function viewOpTask(id) {
+  let t;
+  try { t = (await api("/api/op/" + id)).task; } catch (e) { $("#view").innerHTML = opLocked(e); return {status: "error"}; }
+  document.querySelectorAll("details[data-i]").forEach(d => { if (d.open) opOpen.add(+d.dataset.i); else opOpen.delete(+d.dataset.i); });
+  let pi = -1; t.log.forEach(e => { if (e.kind === "phase") pi += 1; e._ph = pi; });  // which phase each log line belongs to
+  const active = ["planning", "running", "needs_you", "paused", "plan_ready"].includes(t.status);
+  $("#view").innerHTML = `
+  <div class="card"><a href="#/op" class="hint" data-testid="op-back">‹ Operator</a>
+    <div class="row" style="margin-top:6px"><span class="pill s-${opPill(t.status)}" data-testid="op-status">${esc(opWord(t.status))}</span><span class="hint">${esc(t.model)} · ${t.calls || 0} calls · ≈ ${fmtUsd(t.cost || 0)} of ${fmtUsd(t.budget_usd)}</span></div>
+    <h2 style="margin:10px 0 0;font-size:18px" data-testid="op-task-text">${esc(t.task)}</h2>
+    ${t.stop_reason ? `<p class="warn" data-testid="op-stop-reason">${esc(t.stop_reason)}</p>` : ""}
+    ${t.status === "planning" ? `<p class="hint" data-testid="op-planning">Claude is drafting the plan…</p>` : ""}
+    ${t.plan_notes ? `<p class="hint">Notes: ${esc(t.plan_notes)}</p>` : ""}
+    ${t.dossier ? `<p class="hint">Saved: <a href="#/doc/${encodeURIComponent("answers/" + t.dossier.split("/").pop())}" data-testid="op-dossier">${esc(t.dossier.split("/").pop())}</a></p>` : ""}</div>
+  ${t.status === "plan_ready" ? `<div class="card" data-testid="op-approve-card"><label style="margin-top:0">Approve this plan?</label>
+    <p class="hint">${t.phases.length} phase(s), Claude's estimate ≈ ${fmtUsd(t.estimate_usd || 0)}.${t.phases.some(p => p.phone.length) ? ` Phone features: ${esc([...new Set(t.phases.flatMap(p => p.phone))].join(", "))} (Android asks permission the first time each is used).` : ""}</p>
+    <div class="row"><label style="margin:0;text-transform:none;display:flex;align-items:center;gap:6px">Budget $<input id="op-budget2" data-testid="op-approve-budget" type="number" inputmode="decimal" min="0.05" step="0.25" value="${t.budget_usd}" style="width:90px"></label>
+      <label style="margin:0;text-transform:none;display:flex;align-items:center;gap:6px"><input type="checkbox" id="op-pause" data-testid="op-approve-pause" ${t.pause_between ? "checked" : ""}> pause between phases</label>
+      <label style="margin:0;text-transform:none;display:flex;align-items:center;gap:6px"><input type="checkbox" id="op-strict" data-testid="op-approve-strict" ${t.ask_every_change ? "checked" : ""}> tap for every change</label></div>
+    <div class="row" style="margin-top:10px"><button class="primary" data-act="approve_plan" data-testid="op-approve-button">Approve and run</button><button data-act="stop" data-testid="op-decline-button">Decline</button></div></div>` : ""}
+  ${t.phases.map((ph, i) => opPhaseCard(t, ph, i)).join("")}
+  ${active && t.status !== "plan_ready" ? `<div style="height:84px"></div><div class="card" data-testid="op-bar" style="position:sticky;bottom:8px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-color:${t.status === "needs_you" ? "var(--amber)" : "var(--line)"}">
+     ${t.status === "needs_you" && t.pending ? `<p style="margin:0;flex:1 1 100%" data-testid="op-pending">${esc(t.pending.sentence)}</p><button class="primary" data-act="approve" data-testid="op-allow-button">Allow</button><button data-act="deny" data-testid="op-deny-button">Deny</button>`
+       : t.status === "paused" ? `<p style="margin:0;flex:1 1 100%">Phase done. Continue with the next one?</p><button class="primary" data-act="resume" data-testid="op-resume-button">Continue</button>`
+       : `<span class="hint" style="flex:1">${esc((t.log.slice().reverse().find(e => e.kind === "say" || e.kind === "cmd" || e.kind === "phase") || {}).text || "working…")}</span>`}
+     <span class="hint">≈ ${fmtUsd(t.cost || 0)}</span><button data-act="stop" data-testid="op-stop-button">Stop</button></div>` : ""}`;
+  $("#view").onclick = async e => {
+    const b = e.target.closest("button[data-act]"); if (!b) return;
+    const act = b.dataset.act; let body = {};
+    if (act === "approve_plan") body = {budget_usd: $("#op-budget2").value, pause_between: $("#op-pause").checked, ask_every_change: $("#op-strict").checked};
+    if (act === "undo") { if (!confirm(`Restore the files phase ${+b.dataset.phase + 1} wrote or deleted?`)) return; body = {phase: +b.dataset.phase}; }
+    if (act === "stop" && !confirm(t.status === "plan_ready" ? "Decline this plan?" : "Stop the task now?")) return;
+    b.disabled = true;
+    try { const r = await api(`/api/op/${id}/${act}`, body); if (act === "undo") toast(`Restored ${r.restored.length} file(s)`); route(); }
+    catch (err) { toast(err.message); b.disabled = false; }
+  };
+  return t;
 }
 
 const tierCls = {ok: "s-ok", outdated: "s-needs_you", missing: "s-error", unknown: "hint", unchecked: "hint"};
@@ -686,9 +770,13 @@ async function renderExports() {
 async function route() {
   clearTimeout(pollTimer);
   const [, tab, id] = (location.hash || "#/ask").split("/");
-  document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === (tab === "job" ? "jobs" : tab === "task" ? "code" : tab === "doc" ? "vault" : tab || "ask")));
+  document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.tab === (tab === "job" ? "jobs" : tab === "task" ? "code" : tab === "doc" ? "vault" : tab === "optask" ? "op" : tab || "ask")));
   try {
-    if (tab === "job" && id) {
+    if (tab === "optask" && id) {
+      const t = await viewOpTask(id);
+      if (["planning", "running"].includes(t.status)) pollTimer = setTimeout(route, 2000);
+    } else if (tab === "op") await viewOp();
+    else if (tab === "job" && id) {
       if (document.querySelector(".pinbox select")) { pollTimer = setTimeout(route, 2000); return; }  // user is pinning: do not wipe the chooser
       const j = await viewJob(id);
       if (!["done", "error", "cancelled"].includes(j.status)) pollTimer = setTimeout(route, 2000);

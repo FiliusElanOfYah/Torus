@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from torus_common import ETC, LLM_TOGGLE, SEARCH_CONF, VAULT, connect_nats, pack, read_conf, write_conf  # noqa: E402
 
 GW = f"http://127.0.0.1:{os.environ.get('TORUS_PORT', '7777')}"
-CONF = {"llm": LLM_TOGGLE, "search": SEARCH_CONF, "coder": ETC / "coder.conf", "oracle": ETC / "oracle.conf"}
+CONF = {"llm": LLM_TOGGLE, "search": SEARCH_CONF, "coder": ETC / "coder.conf", "oracle": ETC / "oracle.conf", "operator": ETC / "operator.conf"}
 
 
 def token():
@@ -180,6 +180,87 @@ def cmd_spend(a):
     runpy.run_module("torus_spend", run_name="__main__")
 
 
+def _op_print_plan(t):
+    print(f"\n== plan for: {t['task']}   (model {t['model']}, estimate ≈ ${t.get('estimate_usd', 0):.2f}, budget ${t['budget_usd']:.2f})")
+    for i, ph in enumerate(t["phases"]):
+        print(f"  {i + 1}. {ph['title']}")
+        for k, label in (("reads", "reads"), ("changes", "changes"), ("runs", "runs"), ("phone", "phone")):
+            if ph.get(k):
+                print(f"       {label}: {'; '.join(ph[k])}")
+    if t.get("plan_notes"):
+        print(f"  notes: {t['plan_notes']}")
+
+
+def _op_follow(tid):
+    """Print log entries as they appear; answer taps on the terminal."""
+    seen = 0
+    while True:
+        t = http("GET", f"/api/op/{tid}")["task"]
+        for e in t["log"][seen:]:
+            mark = {"cmd": "$", "out": " ", "say": "·", "ask": "?", "phase": "==", "summary": "##", "tap": "✓", "blocked": "x",
+                    "stop": "!!", "error": "!!", "done": "OK", "note": "..", "plan": "==", "undo": "<<"}.get(e["kind"], "-")
+            txt = e["text"] if e["kind"] != "out" else "\n".join("   " + l for l in e["text"].splitlines()[:12])
+            print(f"{mark} {txt}")
+        seen = len(t["log"])
+        if t["status"] == "needs_you" and t.get("pending"):
+            ans = input(f"\n?? {t['pending']['sentence']}\n   allow? [y/N/stop] ").strip().lower()
+            http("POST", f"/api/op/{tid}/{'approve' if ans == 'y' else 'stop' if ans == 'stop' else 'deny'}", {})
+        elif t["status"] == "paused":
+            ans = input("\n.. paused between phases. continue? [Y/stop] ").strip().lower()
+            http("POST", f"/api/op/{tid}/{'stop' if ans == 'stop' else 'resume'}", {})
+        elif t["status"] in ("done", "stopped", "error", "interrupted"):
+            print(f"\n{t['status']} · {t.get('calls', 0)} calls · ≈ ${t['cost']:.4f}" + (f" · {t['stop_reason']}" if t.get("stop_reason") else ""))
+            if t.get("dossier"):
+                print(f"dossier: {t['dossier']}   undo a phase: torus op undo {tid} <n>")
+            return
+        time.sleep(2)
+
+
+def cmd_op(a):
+    args = list(a.args)
+    sub = args[0] if args else "list"
+    if sub == "create":
+        task = " ".join(args[1:]).strip()
+        t = http("POST", "/api/op", {"task": task})["task"]
+        print(f"planning {t['id']} ...")
+        while t["status"] == "planning":
+            time.sleep(2)
+            t = http("GET", f"/api/op/{t['id']}")["task"]
+        if t["status"] != "plan_ready":
+            sys.exit(f"{t['status']}: {t.get('stop_reason') or ''}")
+        _op_print_plan(t)
+        ans = input("\napprove? [y/N]  (or a number to set the budget in USD, e.g. 2) ").strip().lower()
+        if ans in ("y", "yes") or ans.replace(".", "", 1).isdigit():
+            body = {"budget_usd": float(ans)} if ans.replace(".", "", 1).isdigit() else {}
+            http("POST", f"/api/op/{t['id']}/approve_plan", body)
+            _op_follow(t["id"])
+        else:
+            http("POST", f"/api/op/{t['id']}/stop", {})
+            print("plan declined")
+    elif sub == "list":
+        for t in http("GET", "/api/op")["tasks"]:
+            print(f"{t['id']}  {t['status']:10} ≈ ${t['cost'] or 0:.4f}  {t['task'][:70]}")
+    elif sub in ("show", "follow") and len(args) > 1:
+        t = http("GET", f"/api/op/{args[1]}")["task"]
+        if sub == "show":
+            _op_print_plan(t) if t["phases"] else print(t["status"])
+            for e in t["log"][-30:]:
+                print(f"{e['kind']:8} {e['text'][:200]}")
+        else:
+            _op_follow(args[1])
+    elif sub in ("approve", "yes", "no", "stop", "resume") and len(args) > 1:
+        act = {"approve": "approve_plan", "yes": "approve", "no": "deny"}.get(sub, sub)
+        t = http("POST", f"/api/op/{args[1]}/{act}", {})["task"]
+        print(t["status"])
+        if act == "approve_plan":
+            _op_follow(args[1])
+    elif sub == "undo" and len(args) > 2:
+        r = http("POST", f"/api/op/{args[1]}/undo", {"phase": int(args[2]) - 1})
+        print(f"restored {len(r['restored'])} file(s)" + (f"; could not restore: {', '.join(r['missing'])}" if r["missing"] else ""))
+    else:
+        sys.exit('usage: torus op "task" | list | show <id> | follow <id> | approve <id> | yes <id> | no <id> | stop <id> | resume <id> | undo <id> <phase>')
+
+
 def cmd_verify(a):
     r = http("POST", "/api/llm/verify", {"fix": not a.check_only})
     for t, info in r["tiers"].items():
@@ -284,6 +365,9 @@ def main():
     s.set_defaults(fn=cmd_selftest)
     sub.add_parser("models").set_defaults(fn=cmd_models)
     sub.add_parser("spend").set_defaults(fn=cmd_spend)
+    s = sub.add_parser("op")
+    s.add_argument("args", nargs="*")
+    s.set_defaults(fn=cmd_op)
     s = sub.add_parser("verify")
     s.add_argument("--check-only", action="store_true")
     s.set_defaults(fn=cmd_verify)

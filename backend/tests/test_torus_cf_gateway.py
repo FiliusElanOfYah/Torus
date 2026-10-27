@@ -58,7 +58,7 @@ def test_audit_check_cf_gateway(monkeypatch):
     st, msg, fix = torus_audit.check_cf_gateway()
     assert st == "warn" and "Cloudflare" in msg and "torus llm gateway off" in fix
     assert any(cid == "extra-4" for cid, _, _ in torus_audit.CHECKS)
-    assert len(torus_audit.CHECKS) == 14
+    assert len(torus_audit.CHECKS) == 15
 
 
 def torus(*args, home):

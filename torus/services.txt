@@ -14,3 +14,4 @@
 6 gatewayd     python.run  own
 7 coderd       python.run  own
 7 oracled      python.run  own
+10 operatord    python.run  own
