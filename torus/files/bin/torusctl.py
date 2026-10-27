@@ -175,6 +175,11 @@ def cmd_models(a):
         print(f"{m['id']:40} {m.get('display_name', '')}")
 
 
+def cmd_spend(a):
+    import runpy
+    runpy.run_module("torus_spend", run_name="__main__")
+
+
 def cmd_verify(a):
     r = http("POST", "/api/llm/verify", {"fix": not a.check_only})
     for t, info in r["tiers"].items():
@@ -278,6 +283,7 @@ def main():
     s.add_argument("what", choices=["ingest", "llm"])
     s.set_defaults(fn=cmd_selftest)
     sub.add_parser("models").set_defaults(fn=cmd_models)
+    sub.add_parser("spend").set_defaults(fn=cmd_spend)
     s = sub.add_parser("verify")
     s.add_argument("--check-only", action="store_true")
     s.set_defaults(fn=cmd_verify)

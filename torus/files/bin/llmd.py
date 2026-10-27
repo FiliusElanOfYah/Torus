@@ -18,6 +18,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import httpx  # noqa: E402
 from torus_common import LOGS, append_jsonl, get_secret, key_present, llm_settings, log, pack, resolve_model, run_daemon  # noqa: E402
+import torus_spend  # noqa: E402
 
 NAME = "llmd"
 API = "https://api.anthropic.com/v1"
@@ -41,6 +42,12 @@ async def call_claude(req):
     s = llm_settings()
     if not s["enabled"]:
         return {"ok": False, "error": "LLM is off. Turn it on with: torus llm on"}
+    cap = torus_spend.daily_cap()
+    if cap:
+        spent = torus_spend.today_usd()
+        if spent >= cap:
+            log(NAME, f"refused: daily cap ${cap:.2f} reached (${spent:.4f})", req.get("job_id"))
+            return {"ok": False, "error": torus_spend.cap_message(cap, spent), "cap_hit": True}
     key = await get_secret("anthropic")
     cf_token = ""
     if s["cf_account"] and key_present("cloudflare"):
@@ -61,10 +68,13 @@ async def call_claude(req):
             if r.status_code == 200:
                 j = r.json()
                 text = "".join(b.get("text", "") for b in j.get("content", []) if b.get("type") == "text")
+                usage = j.get("usage", {}) or {}
+                usd = torus_spend.cost(j.get("model", model), usage)
+                cached = (r.headers.get("cf-aig-cache-status") or "").upper() == "HIT"  # Cloudflare AI Gateway cache hit
                 append_jsonl(LOGS / "llmd-usage.jsonl", {"t": time.time(), "model": j.get("model", model),
-                                                        "usage": j.get("usage", {}), "job": req.get("job_id")})
+                                                        "usage": usage, "cost": usd, "cached": cached, "job": req.get("job_id")})
                 return {"ok": True, "text": text, "model": j.get("model", model),
-                        "usage": j.get("usage", {}), "stop_reason": j.get("stop_reason")}
+                        "usage": usage, "cost": usd, "cached": cached, "stop_reason": j.get("stop_reason")}
             err = f"HTTP {r.status_code}: {r.text[:400]}"
             if r.status_code not in RETRY:
                 return {"ok": False, "error": err}

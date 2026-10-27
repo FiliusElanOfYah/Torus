@@ -23,7 +23,9 @@ async def main():
                         "print(f'hello from {name}')\n<<<END>>>\n<<<FILE README.md>>>\n# demo\n<<<END>>>\n")
         else:
             text = f"Stub answer citing [1]. Messages seen: {len(req.get('messages') or [])}"
-        await nc.publish(req["reply_to"], json.dumps({"ok": True, "text": text, "model": "stub"}).encode())
+        await nc.publish(req["reply_to"], json.dumps({"ok": True, "text": text, "model": "stub",
+                                                       "usage": {"input_tokens": 1200, "output_tokens": 300},
+                                                       "cost": 0.0054, "cached": False}).encode())
 
     await nc.subscribe("torus.llm.egress", cb=on)
 

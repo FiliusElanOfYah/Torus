@@ -26,7 +26,7 @@ mark{background:#3a3000;color:var(--amber);border-radius:2px}
 main{padding:16px;max-width:860px;margin:0 auto;padding-bottom:calc(env(safe-area-inset-bottom) + 32px)}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;margin-bottom:16px}
 label{display:block;font:600 12px var(--mono);color:var(--dim);text-transform:uppercase;letter-spacing:.08em;margin:12px 0 6px}
-textarea,input[type=text],select{width:100%;background:#0e1211;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:12px;font:15px var(--sans)}
+textarea,input[type=text],input:not([type]),input[type=number],select{width:100%;background:#0e1211;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:12px;font:15px var(--sans)}
 textarea{min-height:88px;resize:vertical}textarea.mono{font:13px var(--mono)}
 button{min-height:44px;padding:0 18px;border-radius:8px;border:1px solid var(--line);background:#1b221f;color:var(--text);font:600 14px var(--mono);cursor:pointer}
 button.primary{background:var(--amber);color:#111;border-color:var(--amber)}button.danger{color:var(--red)}
@@ -50,7 +50,7 @@ button:active{transform:scale(.98)}button:disabled{opacity:.5}
 .cite{display:inline-block;font:600 12px var(--mono);color:var(--amber);text-decoration:none;padding:6px 5px;margin:-6px -2px}
 .log{font:12px var(--mono);color:var(--dim);white-space:pre-wrap;max-height:180px;overflow:auto}
 .svc{display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--line);font:13px var(--mono)}
-.hint{color:var(--dim);font-size:14px}code.k{font:13px var(--mono);color:var(--amber)}
+.hint{color:var(--dim);font-size:14px}code.k{font:13px var(--mono);color:var(--amber);overflow-wrap:anywhere}
 #toast{position:fixed;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom) + 16px);background:#222b27;border:1px solid var(--amber);padding:12px 16px;border-radius:8px;display:none;z-index:9}
 .turn{border-left:3px solid var(--amber);padding-left:12px}
 .diff{background:#0e1211;border:1px solid var(--line);border-radius:8px;overflow-x:auto;font:12px/1.45 var(--mono);padding:8px 0;max-height:420px;overflow-y:auto}
@@ -92,6 +92,14 @@ async function api(path, body) {
   return j;
 }
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.style.display = "block"; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = "none", 3500); }
+const fmtUsd = x => "$" + (x >= 0.1 ? x.toFixed(2) : x.toFixed(4));
+const fmtTok = n => n >= 1000 ? (n / 1000).toFixed(1).replace(/\.0$/, "") + "k" : String(n || 0);
+const costTag = t => t && typeof t.cost === "number" ? `<span class="hint" data-testid="turn-cost">≈ ${fmtUsd(t.cost)} · ${fmtTok(t.usage?.input_tokens)} in / ${fmtTok(t.usage?.output_tokens)} out${t.cached ? " · <b class=\"s-ok\">cached, free</b>" : ""}</span>` : "";
+function spendLine(sp) {
+  if (!sp || !sp.ok) return "";
+  const cap = sp.cap_usd ? ` · cap ${fmtUsd(sp.cap_usd)}/day, <b>${sp.cap_hit ? "reached — Claude paused until midnight" : fmtUsd(sp.cap_left_usd) + " left"}</b>` : " · no daily cap";
+  return `<p class="hint ${sp.cap_hit ? "warn" : ""}" data-testid="ask-spend-meter">Claude today ≈ <b>${fmtUsd(sp.today.usd)}</b> (${sp.today.calls} call${sp.today.calls === 1 ? "" : "s"}) · this month ≈ <b>${fmtUsd(sp.month.usd)}</b>${cap}. <a href="#/settings" data-testid="ask-spend-settings">Set cap</a></p>`;
+}
 const when = t => new Date(t * 1000).toLocaleString();
 
 function md(src) {
@@ -119,6 +127,7 @@ async function health() {
 async function viewAsk() {
   settings = settings || await api("/api/settings");
   askMode = askMode || settings.search_mode;
+  const spend = await api("/api/spend").catch(() => null);
   $("#view").innerHTML = `
   <div class="card">
     <label for="q">Question</label>
@@ -135,6 +144,7 @@ async function viewAsk() {
       <option value="">Default (${esc(settings.model)})</option><option value="sonnet">Sonnet</option><option value="opus">Opus</option><option value="haiku">Haiku (fast)</option>
     </select>
     <p class="hint" data-testid="ask-llm-state">LLM is <b>${settings.llm_enabled ? "ON" : "OFF"}</b>${settings.llm_enabled && !settings.keys.anthropic ? " but no key is stored" : ""}. When off, TORUS writes a local summary instead.</p>
+    ${spendLine(spend)}
     <div class="row"><label style="margin:0;display:flex;gap:8px;align-items:center;text-transform:none"><input type="checkbox" id="fresh" data-testid="ask-fresh-checkbox"> Ignore cache</label></div>
     <div class="row" style="margin-top:12px"><button class="primary" id="go" data-testid="ask-submit-button">Ask TORUS</button></div>
   </div>`;
@@ -177,7 +187,7 @@ async function viewJob(id) {
   $("#view").innerHTML = `
   <div class="card">
     <div class="row"><span class="pill s-${j.status}" data-testid="job-status">${j.status === "needs_you" ? "Needs you" : j.status}</span>
-      <span class="hint">${esc(j.engine || "")}</span></div>
+      <span class="hint">${esc(j.engine || "")}</span> ${costTag(j)}</div>
     <h2 style="margin:10px 0 0;font-size:19px" data-testid="job-question">${esc(j.question)}</h2>
     ${j.warnings.map(w => `<p class="warn" data-testid="job-warning">${esc(w)}</p>`).join("")}
     ${j.error ? `<p class="warn s-error" data-testid="job-error">${esc(j.error)}</p>` : ""}
@@ -187,7 +197,7 @@ async function viewJob(id) {
   ${j.answer ? `<div class="card answer" data-testid="job-answer">${md(j.answer)}
      ${j.answer_path ? `<p class="hint" data-testid="job-answer-path">Saved: ${esc(j.answer_path)}</p>` : ""}</div>` : ""}
   ${(j.followups || []).map((t, i) => `<div class="card answer turn" data-testid="followup-${i + 1}">
-     <label style="margin-top:0">Follow-up ${i + 1}${t.engine ? " | " + esc(t.engine) : ""}</label>
+     <label style="margin-top:0">Follow-up ${i + 1}${t.engine ? " | " + esc(t.engine) : ""}</label> ${costTag(t)}
      <h3 style="margin:4px 0 8px;font-size:16px" data-testid="followup-question-${i + 1}">${esc(t.question)}</h3>
      ${(t.warnings || []).map(w => `<p class="warn">${esc(w)}</p>`).join("")}
      ${t.answer ? `<div data-testid="followup-answer-${i + 1}">${md(t.answer)}</div>` : `<p class="hint">Working on it...</p>`}</div>`).join("")}
@@ -543,6 +553,21 @@ async function viewSettings() {
     <div id="models-body"><p class="hint">loading…</p></div>
     <div class="row"><button id="models-verify" data-testid="models-verify" ${s.keys.anthropic?"":"disabled"}>Verify model ids</button></div>
     <p class="hint">Asks Anthropic (with your key) which models exist and points each tier at the newest one of its family. Same as <code class="k">torus llm verify</code>.${s.keys.anthropic?"":" Needs an Anthropic key first."}</p></div>
+  <div class="card" data-testid="settings-spend"><label style="margin-top:0">Claude spend</label>
+    <div id="spend-body"><p class="hint">loading…</p></div>
+    <label for="cap-usd">Daily cap (USD, 0 = none)</label>
+    <div class="row"><input id="cap-usd" data-testid="settings-cap-input" type="number" inputmode="decimal" min="0" step="0.5" value="${s.daily_cap_usd || ""}" placeholder="e.g. 2" style="width:120px">
+      <button id="cap-save" data-testid="settings-cap-save">Save cap</button></div>
+    <p class="hint">Once today's estimate reaches the cap, every Claude call (answers, follow-ups, Coder) is refused until local midnight and TORUS falls back to the local summary. Same as <code class="k">torus llm cap &lt;usd&gt;</code>. Pinned-topic refills never use Claude, so they are unaffected.</p></div>
+  <div class="card" data-testid="settings-gateway"><label style="margin-top:0">Claude traffic path</label>
+    <div class="seg" data-testid="settings-gateway-toggle"><button data-cf="0" class="${s.cf_enabled?"":"on"}" data-testid="settings-gateway-direct">Direct to Anthropic</button><button data-cf="1" class="${s.cf_enabled?"on":""}" data-testid="settings-gateway-cloudflare">Via Cloudflare gateway</button></div>
+    <p class="hint" data-testid="settings-gateway-state">${s.cf_enabled
+      ? `Calls go through <code class="k">gateway.ai.cloudflare.com/v1/${esc(s.cf_account)}/${esc(s.cf_gateway)}/anthropic</code>: Cloudflare sees prompts and answers; you get its dashboard, caching and caps. Gateway token: <b class="${s.keys.cloudflare?"s-ok":"hint"}">${s.keys.cloudflare?"stored":"not set (fine unless the gateway is set to Authenticated)"}</b>.`
+      : `Calls go straight to <code class="k">api.anthropic.com</code>; no third party in the path.${s.cf_saved_gateway ? ` Saved gateway <code class="k">${esc(s.cf_saved_account)}/${esc(s.cf_saved_gateway)}</code> is one tap away.` : ""}`}</p>
+    <div id="cf-form" style="display:${s.cf_enabled || s.cf_saved_gateway ? "none" : "block"}">
+      <label for="cf-acct">Cloudflare Account ID</label><input id="cf-acct" data-testid="settings-cf-account" class="mono" placeholder="32 hex characters from the dashboard URL" value="${esc(s.cf_saved_account || "")}">
+      <label for="cf-gw">Gateway name</label><input id="cf-gw" data-testid="settings-cf-gateway" class="mono" placeholder="torus" value="${esc(s.cf_saved_gateway || "")}">
+      <p class="hint">Create one at Cloudflare dashboard → AI → AI Gateway. Your Anthropic key still pays. Authenticated gateway? <code class="k">torus key set cloudflare</code></p></div></div>
   <div class="card"><label style="margin-top:0">Default sources for questions</label>
     <div class="seg" data-testid="settings-search-toggle">${["urls","brave","both"].map(m=>`<button data-search="${m}" class="${s.search_mode===m?"on":""}" data-testid="settings-search-${m}">${m==="urls"?"Pasted URLs":m==="brave"?"Brave Search":"Both"}</button>`).join("")}</div>
     <p class="hint" data-testid="settings-brave-key">Brave Search key: <b class="${s.keys.brave?"s-ok":"s-error"}">${s.keys.brave?"stored":"not set"}</b>. Set one with <code class="k">torus key set brave</code></p></div>
@@ -557,7 +582,13 @@ async function viewSettings() {
     <div class="row"><button id="export-run" data-testid="export-run">Export setup</button>
       <label class="hint" style="margin:0;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="export-keys" data-testid="export-with-keys" style="width:22px;height:22px;accent-color:var(--amber)"> include API keys</label></div>
     <p class="hint">Writes a signed <code class="k">torus-&lt;date&gt;.tar.gz</code> to Downloads. Restore on another phone with <code class="k">torus restore &lt;file&gt;</code>.</p></div>`;
-  renderAudit(); renderExports(); renderModels();
+  renderAudit(); renderExports(); renderModels(); renderSpend();
+  $("#cap-save").onclick = async () => {
+    $("#cap-save").disabled = true;
+    try { settings = await api("/api/settings", {daily_cap_usd: $("#cap-usd").value || 0}); toast(settings.daily_cap_usd ? `Cap ${fmtUsd(settings.daily_cap_usd)}/day` : "Cap removed"); await renderSpend(); }
+    catch (err) { toast(err.message); }
+    $("#cap-save").disabled = false;
+  };
   $("#models-verify").onclick = async () => {
     $("#models-verify").disabled = true;
     try { const r = await api("/api/llm/verify", {fix: true}); settings = r.settings;
@@ -589,11 +620,32 @@ async function viewSettings() {
     const b = e.target.closest("button"); if (!b) return; let body = null;
     if (b.dataset.llm) body = {llm_enabled: b.dataset.llm === "1"};
     if (b.dataset.auto) body = {auto_route: b.dataset.auto === "1"};
+    if (b.dataset.cf) {
+      body = {cf_enabled: b.dataset.cf === "1"};
+      if (body.cf_enabled && !settings.cf_enabled) {
+        const acct = ($("#cf-acct")?.value || settings.cf_saved_account || "").trim(), gw = ($("#cf-gw")?.value || settings.cf_saved_gateway || "").trim();
+        if (!acct || !gw) { $("#cf-form").style.display = "block"; return toast("Enter your Cloudflare Account ID and gateway name first"); }
+        body.cf_account = acct; body.cf_gateway = gw;
+      }
+    }
     if (b.dataset.model) body = {model: b.dataset.model};
     if (b.dataset.search) { body = {search_mode: b.dataset.search}; askMode = b.dataset.search; }
     if (!body) return;
-    try { settings = await api("/api/settings", body); toast("Saved"); viewSettings(); } catch (err) { toast(err.message); }
+    try { settings = await api("/api/settings", body); toast(body.cf_enabled === true ? "Claude now goes via Cloudflare" : body.cf_enabled === false ? "Claude goes direct to Anthropic" : "Saved"); viewSettings(); } catch (err) { toast(err.message); }
   };
+}
+
+async function renderSpend() {
+  const el = $("#spend-body"); if (!el) return;
+  try {
+    const sp = await api("/api/spend");
+    const fam = Object.entries(sp.today.by_model).sort().map(([f, b]) => `${f} ${fmtUsd(b.usd)} (${b.calls})`).join(" · ");
+    el.innerHTML = `<div class="svc" data-testid="spend-today"><span>Today</span><span><b>≈ ${fmtUsd(sp.today.usd)}</b> · ${sp.today.calls} calls · ${fmtTok(sp.today.input_tokens)} in / ${fmtTok(sp.today.output_tokens)} out${sp.today.cached_calls ? ` · ${sp.today.cached_calls} cached` : ""}</span></div>
+      <div class="svc" data-testid="spend-month"><span>This month</span><span><b>≈ ${fmtUsd(sp.month.usd)}</b> · ${sp.month.calls} calls · ${fmtTok(sp.month.input_tokens)} in / ${fmtTok(sp.month.output_tokens)} out</span></div>
+      ${fam ? `<p class="hint" data-testid="spend-by-model">Today by tier: ${fam}</p>` : ""}
+      ${sp.cap_hit ? `<p class="warn" data-testid="spend-cap-hit">Daily cap reached: Claude is paused until midnight. Raise the cap below to continue.</p>` : ""}
+      <p class="hint">Estimates from Anthropic's list prices (${["sonnet","opus","haiku"].map(f => `${f} $${sp.prices[f + "_in"]}/$${sp.prices[f + "_out"]}`).join(", ")} per MTok). Correct them in <code class="k">${esc(sp.prices_path)}</code>; the bill at console.anthropic.com is the truth.</p>`;
+  } catch (e) { el.innerHTML = `<p class="warn">${esc(e.message)}</p>`; }
 }
 
 const tierCls = {ok: "s-ok", outdated: "s-needs_you", missing: "s-error", unknown: "hint", unchecked: "hint"};

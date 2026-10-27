@@ -252,16 +252,30 @@ cmd_llm() {
     gateway)
       # Cloudflare AI Gateway: dashboard -> AI -> AI Gateway -> Create. Needs Account ID + gateway name.
       case "${2:-status}" in
-        off) ctl conf llm cf_account= cf_gateway=; ok "Claude calls go straight to api.anthropic.com again" ;;
-        status) ctl conf llm | grep -E '^cf_' || info "gateway off (torus llm gateway <account_id> <gateway_name>)" ;;
-        *) [ -n "${3:-}" ] || die "usage: torus llm gateway <account_id> <gateway_name> | off | status"
+        off) a="$(ctl conf llm | sed -n 's/^cf_account=//p')"; g="$(ctl conf llm | sed -n 's/^cf_gateway=//p')"
+             ctl conf llm cf_account= cf_gateway= ${a:+"cf_saved_account=$a"} ${g:+"cf_saved_gateway=$g"}
+             ok "Claude calls go straight to api.anthropic.com again" ;;
+        on) a="$(ctl conf llm | sed -n 's/^cf_saved_account=//p')"; g="$(ctl conf llm | sed -n 's/^cf_saved_gateway=//p')"
+            [ -n "$a" ] && [ -n "$g" ] || die "no saved gateway yet: torus llm gateway <account_id> <gateway_name>"
+            ctl conf llm "cf_account=$a" "cf_gateway=$g"; ok "Claude calls go via Cloudflare gateway $a/$g again" ;;
+        status) ctl conf llm | grep -E '^cf_(account|gateway)=.' || info "gateway off (torus llm gateway <account_id> <gateway_name> | on)" ;;
+        *) [ -n "${3:-}" ] || die "usage: torus llm gateway <account_id> <gateway_name> | on | off | status"
            case "$2$3" in *[!A-Za-z0-9_-]*) die "account id and gateway name: letters, digits, - and _ only" ;; esac
-           ctl conf llm "cf_account=$2" "cf_gateway=$3"
+           ctl conf llm "cf_account=$2" "cf_gateway=$3" "cf_saved_account=$2" "cf_saved_gateway=$3"
            ok "Claude calls now go via gateway.ai.cloudflare.com/v1/$2/$3/anthropic (your Anthropic key still pays)"
            info "authenticated gateway? store its token too:  torus key set cloudflare" ;;
       esac ;;
+    cap)
+      # Daily Claude spend cap (estimate, USD). llmd refuses calls past it until local midnight.
+      case "${2:-status}" in
+        off|0) ctl conf llm daily_cap_usd=; ok "no daily cap" ;;
+        status) ctl conf llm | grep -E '^daily_cap_usd=.' || info "no daily cap (torus llm cap <usd>)" ;;
+        *) case "$2" in ''|*[!0-9.]*|*.*.*) die "usage: torus llm cap <usd> | off | status   e.g. torus llm cap 2.50" ;; esac
+           ctl conf llm "daily_cap_usd=$2"; ok "Claude pauses for the day once today's estimate reaches \$$2 (torus llm spend)" ;;
+      esac ;;
+    spend) ctl spend ;;
     status) ctl conf llm ;;
-    *) die "usage: torus llm on|off|status|test|models|verify [--check-only]|auto on|off|gateway <acct> <name>|off|model <sonnet|opus|haiku>|id <tier> <id>" ;;
+    *) die "usage: torus llm on|off|status|test|models|verify [--check-only]|auto on|off|gateway <acct> <name>|on|off|cap <usd>|off|spend|model <sonnet|opus|haiku>|id <tier> <id>" ;;
   esac
 }
 

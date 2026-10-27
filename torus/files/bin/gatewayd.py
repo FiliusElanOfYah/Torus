@@ -30,6 +30,7 @@ import httpx  # noqa: E402
 import gateway_code  # noqa: E402
 from torus_cite import citation_map, extract_links  # noqa: E402
 import torus_models  # noqa: E402
+import torus_spend  # noqa: E402
 from torus_common import (ETC, HOME, LLM_TOGGLE, MODEL_ALIASES, SEARCH_CONF, VAR, VAULT, atomic_write,  # noqa: E402
                           connect_nats, extract, get_secret, key_present, llm_settings, log, pack, rank_sentences,
                           read_conf, resolve_model, search_settings, slugify, split_sentences, truthy, write_conf)
@@ -278,7 +279,12 @@ async def step_answer(j):
             res = {"ok": False, "error": f"sentineld/llmd did not answer ({e.__class__.__name__})"}
         if res.get("ok") and res.get("text"):
             t["answer"], t["engine"] = res["text"], f"claude:{res.get('model')}"
+            t["cost"] = res.get("cost")
+            t["usage"] = {k: int(res.get("usage", {}).get(k) or 0) for k in ("input_tokens", "output_tokens")}
+            t["cached"] = bool(res.get("cached"))
         else:
+            if res.get("cap_hit"):
+                note(j, "daily Claude cap reached; local summary instead")
             t["warnings"].append(f"Claude unavailable: {res.get('error')}. Used the local summary instead.")
     elif st["enabled"]:
         t["warnings"].append("LLM is on but no Anthropic key is stored. In Termux: torus key set anthropic")
@@ -473,7 +479,13 @@ def settings_payload():
                           "status": (last.get("tiers", {}).get(t) or {}).get("status", "unchecked")} for t in torus_models.TIERS},
             "models_checked": last.get("when", 0), "models_problems": last.get("problems", 0),
             "search_mode": srch["mode"], "search_count": srch["count"],
-            "keys": {"anthropic": key_present("anthropic"), "brave": key_present("brave")}}
+            "keys": {"anthropic": key_present("anthropic"), "brave": key_present("brave"), "cloudflare": key_present("cloudflare")},
+            "cf_account": llm["cf_account"], "cf_gateway": llm["cf_gateway"], "cf_enabled": bool(llm["cf_account"] and llm["cf_gateway"]),
+            "cf_saved_account": c.get("cf_saved_account", ""), "cf_saved_gateway": c.get("cf_saved_gateway", ""),
+            "daily_cap_usd": torus_spend.daily_cap()}
+
+
+CF_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 async def api_settings(body):
@@ -482,6 +494,27 @@ async def api_settings(body):
         return err(400, "model must be sonnet, opus or haiku")
     if "auto_route" in body and not isinstance(body["auto_route"], bool):
         return err(400, "auto_route must be true or false")
+    if "daily_cap_usd" in body:
+        try:
+            body["daily_cap_usd"] = round(max(0.0, min(1000.0, float(body["daily_cap_usd"] or 0))), 2)
+        except (TypeError, ValueError):
+            return err(400, "daily_cap_usd must be a number (0 = no cap)")
+    cf = None
+    if "cf_enabled" in body:
+        if not isinstance(body["cf_enabled"], bool):
+            return err(400, "cf_enabled must be true or false")
+        if body["cf_enabled"]:
+            cur = read_conf(LLM_TOGGLE)
+            acct = str(body.get("cf_account") or cur.get("cf_saved_account") or "").strip()
+            gw = str(body.get("cf_gateway") or cur.get("cf_saved_gateway") or "").strip()
+            if not (CF_ID.match(acct) and CF_ID.match(gw)):
+                return err(400, "Enter your Cloudflare Account ID and gateway name (letters, digits, - and _)")
+            cf = {"cf_account": acct, "cf_gateway": gw, "cf_saved_account": acct, "cf_saved_gateway": gw}
+        else:
+            cur = llm_settings()
+            cf = {"cf_account": "", "cf_gateway": ""}
+            if cur["cf_account"] and cur["cf_gateway"]:
+                cf.update(cf_saved_account=cur["cf_account"], cf_saved_gateway=cur["cf_gateway"])
     if "search_mode" in body and body["search_mode"] not in ("urls", "brave", "both"):
         return err(400, "search_mode must be urls, brave or both")
     if "search_count" in body:
@@ -498,6 +531,10 @@ async def api_settings(body):
         write_conf(LLM_TOGGLE, {"enabled": "true" if body["llm_enabled"] else "false"})
     if "auto_route" in body:
         write_conf(LLM_TOGGLE, {"auto_route": "true" if body["auto_route"] is True else "false"})
+    if "daily_cap_usd" in body:
+        write_conf(LLM_TOGGLE, {"daily_cap_usd": body["daily_cap_usd"] or ""})
+    if cf is not None:
+        write_conf(LLM_TOGGLE, cf)
     if "model" in body:
         write_conf(LLM_TOGGLE, {"model": body["model"]})
     if tier_ids:
@@ -812,6 +849,8 @@ async def route(method, path, query, body, headers=None):
                      "audit_fail": audit_failures()}
     if path == "/api/audit":
         return await api_audit(method)
+    if method == "GET" and path == "/api/spend":
+        return 200, torus_spend.summary()
     if path.startswith("/api/llm/"):
         return await api_llm(method, path, body)
     if method == "GET" and path.startswith("/api/vault/"):

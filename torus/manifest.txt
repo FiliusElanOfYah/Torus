@@ -16,7 +16,9 @@
 5 own  0755 bin/airgapd.py          H:bin/airgapd.py
 5 own  0755 bin/sentineld.py        H:bin/sentineld.py
 5 own  0755 bin/llmd.py             H:bin/llmd.py
+5 own  0644 bin/torus_spend.py      H:bin/torus_spend.py
 5 keep 0644 etc/llm.toggle          H:etc/llm.toggle
+5 keep 0644 etc/prices.conf         H:etc/prices.conf
 6 keep 0644 etc/search.conf         H:etc/search.conf
 6 own  0755 bin/gatewayd.py         H:bin/gatewayd.py
 6 own  0644 bin/gateway_code.py     H:bin/gateway_code.py

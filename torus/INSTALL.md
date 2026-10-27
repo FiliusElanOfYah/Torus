@@ -115,13 +115,28 @@ the gateway. `torus llm off` still stops all Claude spend instantly.
 
 ### Spending less on Claude
 
-- `torus llm auto on` (Haiku for short follow-ups, ~12x cheaper than Sonnet).
-- Pinned topics are the silent spender: `oracled` refreshes every pin **hourly**. Pin few, or
-  `torus oracle every 360` (6 h). `torus oracle off` pauses it.
+- **See it**: the Ask tab shows today's and this month's Claude cost (estimate) at a glance; each
+  answer and follow-up shows what it cost; Settings → *Claude spend* breaks it down by tier.
+  `torus llm spend` prints the same in Termux. Prices live in `~/.torus/etc/prices.conf` (list
+  prices copied from Anthropic; edit if they change) — the bill at console.anthropic.com is the truth.
+- **Cap it**: `torus llm cap 2.50` (or Settings → *Daily cap*). Once today's estimate reaches the
+  cap, llmd refuses every Claude call (answers, follow-ups, Coder) until local midnight; TORUS
+  falls back to the local summary and says so on the job. `torus llm cap off` removes it.
+- `torus llm auto on` (Haiku for short follow-ups, ~20x cheaper than Sonnet).
+- Pinned-topic refills (`oracled`) **never call Claude**: they fetch, hash, TextRank and diff
+  locally. Refill as often as you like; it costs bandwidth, not money.
 - `torus llm off` whenever you do not need Claude: fetch, parse, index, vault and coder all work
   offline for free.
 - Short, specific questions with URLs: TORUS summarises locally first and sends only the digest.
-- With the gateway on: enable caching and set a daily request cap in its settings.
+- With the gateway on: enable caching and set a daily request cap in its settings. Cached answers
+  are marked *cached, free* on the job.
+
+### Claude traffic path (Settings card)
+
+Settings → *Claude traffic path* shows whether calls go **Direct to Anthropic** or **Via Cloudflare
+gateway** and switches with one tap. The first time you pick Cloudflare it asks for the Account ID
+and gateway name; after that both are remembered, so switching back and forth is one tap.
+Same as `torus llm gateway on | off | status`.
 
 ## Step 8: Use it
 
