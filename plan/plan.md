@@ -1,53 +1,66 @@
-# TORUS Operator: the agent works inside Termux, you approve
+# TORUS Workbench: finish your projects from the phone, with Claude as a peer
 
-Claude becomes a hands-on operator on the phone: it reads, runs, edits and installs inside Termux through TORUS, in phases you approve from a summary.
-GitHub and file uploads follow as the next build; the uploads change to larger files and zips kept intact.
+A project workbench inside TORUS: a project database of your code, notes and conversations that both you and Claude read and write; threads with Claude that pick up where the last session ended; a file manager and editor; commits and pull requests to GitHub.
+Utilitarian and logistical: no voice, no sharing, no widgets, no income model. One device, typed input, full logs, no storage cap.
 
 ## Who it's for
 
-The owner, directing analysis and code changes from the phone with taps and short instructions instead of typing commands.
+The owner, finishing already-started SaaS/PaaS builds exclusively from a Samsung Galaxy S26 Ultra in Termux — complex, multi-session work where nothing may be forgotten between sessions.
 
 ## Core features and experience
 
-**Phase 1 (built now): Operator mode**
-- **Operator tab** on the phone page and `torus op "task"` in Termux. A task is anything: "analyse the CSVs in Downloads and chart the monthly totals", "add a retry to fetcherd", "update all packages and re-run the audit".
-- **Plan first**: the agent answers with a phased plan: what it will read, what it will change, what it will run, and the estimated Claude cost. One tap approves the plan; the phases then run one after another.
-- **Approvals, as chosen**: reads (files, folders, logs, `git status`, inspection commands) run by themselves. Changes inside the approved plan (edits, new files, installs, commits) run without extra taps; at the end of each phase the agent posts a summary and the diff, and the next phase starts unless "pause between phases" is on. Anything outside the plan, or on the danger list (deleting folders, `pkg uninstall`, force-push, touching keys/seal, anything outside the Termux home or shared storage), always stops for a tap, every time.
-- **Full Termux reach (as the Termux user, no root)**: shell with the real PATH and environment, every file under the Termux home and shared storage, pkg/pip installs, git with the stored GitHub token, TORUS's own commands. Each phase runs in a workspace folder with before/after snapshots so **Undo phase** restores files in one tap.
-- **Phone features through Termux:API** (Termux:API app from F-Droid + `pkg install termux-api`): clipboard in/out, finish notifications, battery/Wi-Fi/device info, opening results in other apps, camera photo, microphone recording, SMS send/read, location, contacts. Each asks Android's permission the first time it is used, with a one-line reason; a denied permission disables that tool only.
-- **Live view**: streaming log of commands and outputs, files changed with diffs, tokens and dollars so far, Stop button. Finished tasks are saved as dossiers (plan, log, diff, summary) in the Vault and searchable.
-- **Cost guardrails**: per-task budget (default $1, editable at approval), the existing daily cap, Sonnet by default with Opus selectable, long outputs trimmed before they reach Claude. Secrets never reach Claude: the redaction layer already in TORUS applies to every tool result, and key files are unreadable to the agent.
-- **Honest limits**: no root, so system settings, other apps' private data and Android itself are out of reach. Background execution survives screen-off only while Termux holds its wake lock (TORUS acquires it for the task). Camera and mic through Termux:API are single shots/recordings, not live streams.
+**Phase 1 (built now)**
 
-**Phase 2: GitHub read + uploads**
-- `torus key set github`; paste repo/file/folder/issue links as sources; cited like web pages; private repos work.
-- Attach files on Ask and Upload to Vault: PDF, text/Markdown/HTML/CSV/code, .docx up to **100 MB per file**; **.zip stored intact** (not extracted) with its file list indexed, so it can be opened later by the Operator or unpacked on request; 500 MB per upload request. Files never leave the phone.
+- **Projects**: register a folder on the phone or clone a GitHub repo. The project page shows branch and `git status`, the code catalog, open threads, Operator tasks, pull requests, and the session summaries.
+- **Project database** (on-device, in the project's own folder, no size cap):
+  - **Code catalog**: one entry per folder and per file — purpose, key functions/classes, dependencies, last change, open issues, agent notes. Claude fills it on first scan and updates entries it touches; you can edit any entry. Viewable as a tree in the app and as plain Markdown files, searchable.
+  - **Agent notes**: everything Claude observes, decides or tries, timestamped, tied to the file or thread it concerns. Nothing is discarded.
+  - **Conversation log**: the full text of every thread turn (yours and Claude's), the commands run and their output, timestamped.
+  - **Session summaries**: at the end of each session (you tap *End session*, or after 6 hours idle) Claude writes a summary: what was done, key notes, priorities, need-to-knows for the next session, and open questions. The next session starts with the latest summary and the catalog, so nothing is re-explained.
+  - **Archive**: the full agent notes and conversation text of each session are compressed and filed under `<project>/.torus/log/<project>-<timestamp>/` with an index; any archived session can be opened and searched from the app or pulled back into a thread for context.
+- **Workbench thread** (per project): you and Claude research, analyse, plan and write together. Claude reads project files, the catalog, web pages and GitHub links you paste; answers with text, plans and **change cards** (one file diff each). Nothing is written until you tap **Apply** (or **Apply all**); **Run** on a command card executes it and shows the output; "do it end to end" hands the plan to the Operator. Cost per turn and per thread is shown.
+- **Files tab**: file manager for the Termux home, shared storage and projects: folders, sizes, age, search by name and content, new file/folder, rename, move, duplicate; delete asks; open in another Android app. **Editor**: files up to 1 MB open whole; larger files (no cap) open in pages of ~1 MB with a page bar, find-in-file, and save per page — bigger whole-file editing is not practical on a phone browser, pages are. Any file can be attached to a thread or to Ask in one tap.
+- **Terminal card**: command box with history and saved per-project run-buttons; output shown in place; the danger list still asks; every error block has **Explain**, which asks Claude in context and logs the answer as an agent note.
+- **GitHub read**: `torus key set github`; paste repo/file/folder/issue/PR links as sources in Ask or a thread; private repos work; clone a repo as a project.
+- **GitHub write**: **Commit** applied changes on a `torus/<short-task>` branch and **Open pull request** with Claude's summary; both always ask for a tap; pushing to `main`/`master` is on the danger list. PR links land on the project page and in the session summary.
+- **Operator, project-aware**: tasks start in the project folder, read the latest summary and catalog first, and write their notes and summary into the database.
+- **Unchanged and kept**: Brave Search (`torus key set brave`, modes urls / brave / both, also usable from threads as a source), Ask, Jobs, Vault, pinned topics, Code, spend meter, daily cap, Cloudflare gateway option, seal and audit.
+- **Housekeeping from the last test round**: read-only-looking shell commands that change files (`find -delete`, `sed -i`, `sort -o`, subshells, `&`, newlines) count as changes; a settings save with one bad field saves nothing; Operator dossiers link back to the task; the top navigation fits a 390 px screen with 44 px targets.
 
-**Phase 3: GitHub write + reactions + Console agent**
-- Vault backup to a private repo; Coder/Operator commits on a branch with a pull request; webhooks over a Cloudflare Tunnel to guardiaios.app; the Console-built Claude agent wired in if the API can address it, otherwise its prompt becomes a TORUS persona.
+**Phase 2**
+- Scheduled and recurring tasks and questions, results into the database.
+- Project database + Vault backup to a private GitHub repo; `torus update` pulls the latest TORUS from your repo and reinstalls.
+- Uploads: 100 MB per file, 500 MB per request, zips kept intact with a file list.
+
+**Phase 3**
+- Anything that becomes necessary while finishing the builds — added as it appears, nothing pre-planned.
 
 ## User flow
 
-1. Once: install Termux:API from F-Droid, run `torus install 10` (adds the operator daemon and termux-api), grant Android permissions as they are first needed.
-2. Operator tab → type the task → **Plan** → read the phased summary and cost → **Approve** (optionally edit budget, toggle pause-between-phases).
-3. Watch the live log; at each phase end read the summary/diff; tap only when something is outside the plan or on the danger list.
-4. Done: notification on the phone, result on the clipboard if asked, dossier in the Vault, **Undo phase** available for a day.
+1. Once: `torus install 11`, `torus key set github`, **Projects → Add** (folder or repo URL). Claude scans the project and fills the catalog (you approve the cost first).
+2. Open the project → the latest session summary and priorities are on top → **New thread** → describe the bug or feature → Claude reads the catalog and files, proposes a plan and change cards.
+3. **Apply** the cards you agree with, **Run** tests from the terminal card, **Explain** anything cryptic; iterate in the same thread.
+4. **Commit → Open PR** (two taps). Tap **End session**: Claude writes the summary, the full log is compressed and filed, the catalog entries it touched are updated.
+5. Next session opens with the summary; archived sessions are one tap away when a detail is needed.
+6. Termux mirrors: `torus project`, `torus thread`, `torus files`, `torus gh`, `torus session end`.
 
 ## UI/UX feel
 
-Same phone page. The Operator tab is a vertical timeline: plan card on top, one card per phase (pending / running / done / needs you) with a collapsible log, a sticky bottom bar with Stop, cost so far and the single approval button when one is needed. Approval requests read as one sentence in plain words plus the exact command.
+Same phone page, two new tabs: **Projects** (list → project page: summary on top, then catalog tree, threads, tasks, PRs, archive) and **Files** (breadcrumb bar, rows with size/age, long-press menu, full-screen monospace editor with sticky Save and a page bar for big files). Threads are chat bubbles with change cards (diff, Apply/Skip) and command cards (Run, output, Explain), sticky composer with attach-file / paste-link, cost in the header. Dense, readable, thumb-reachable; approvals are one sentence plus the exact command.
 
 ## Implementation phases
 
-- Phase 1 (now): Operator mode end to end: operator daemon with tool-use through the existing Claude path, approval states, snapshots/undo, Termux:API tools, Operator tab, `torus op`, Phase-10 installer, audit lines, INSTALL.md step. Built once, in one pass.
-- Phase 2: GitHub read + uploads with the new limits.
-- Phase 3: GitHub write, webhooks, Console agent.
+- Phase 1 (now): Projects, project database (catalog, notes, conversation log, session summaries, compressed archive), Workbench threads with change/command cards, Files tab with paged editor, Terminal card with Explain, GitHub read + clone, Commit + PR, project-aware Operator, the four housekeeping fixes, CLI mirrors, phase-11 installer, INSTALL.md step. One build pass, one test round.
+- Phase 2: schedules, backups and self-update, large uploads.
+- Phase 3: on demand.
 
 ## Assumptions
 
-- Approval model is the hybrid described: plan approved once; reads automatic; in-plan changes automatic with a summary per phase; danger list and out-of-plan steps always ask. A Settings switch flips to "tap for every change" when wanted.
-- No root; the agent is the Termux user. Key files, the seal and the gateway token are excluded from its reach, and tool output passes through redaction before Claude sees it.
-- Default model Sonnet, per-task budget $1, daily cap applies; the agent stops with a summary when either is reached.
-- Termux:API covers clipboard, notifications, device info, open-with, camera, mic, SMS, location, contacts; Android permission is requested at first use of each, never up front.
-- Undo keeps phase snapshots for 24 hours in the Termux home (not shared storage) and skips files over 50 MB.
-- Uploads (Phase 2): 100 MB per file, 500 MB per request, zips kept intact and listed; OCR still deferred.
+- The database is plain files inside the project (`<project>/.torus/`: `catalog/` mirroring the folder tree, `notes.jsonl`, `threads/`, `sessions/`, `log/`), so it is versioned with the repo when you want it and readable without TORUS. Archive compression is gzip; no deletion ever happens automatically.
+- The first catalog scan is done by Claude file by file (Haiku for small files, Sonnet for large or central ones) with a cost estimate shown before it starts; files over 200 KB, binaries, vendored folders and `node_modules`-type folders are listed but not read.
+- A session is one project's work between opening it and *End session* (or 6 hours idle). Summaries are written by Sonnet; you can edit them.
+- GitHub access is a fine-grained personal access token (Contents read/write, Pull requests read/write, Issues read, Metadata) stored with `torus key set github`; it never leaves the phone and is injected into `git push` per command. Commit author is your git identity; TORUS asks once if git has none.
+- Change cards write whole files; a card is skipped if the file changed on disk since Claude read it, and you are told why. Applied changes are snapshotted so Undo works like Operator phases.
+- The terminal card runs what you type without read/change classification (you typed it); the danger list and protected paths still apply.
+- Claude: Sonnet for drafting, Haiku for short follow-ups (existing auto-route), per-thread budget default $2, daily cap applies; cost shown per turn.
+- Credit discipline: one implementation pass, one testing-agent round, fixes folded in, no polish rounds unless something is broken.

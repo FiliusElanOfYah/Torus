@@ -230,7 +230,7 @@ def classify(action, plan_words, strict):
             if rx.search(cmd):
                 return "danger", why
         segs = shell_segments(cmd)
-        if segs and ">" not in cmd and all(_readonly(s) for s in segs):
+        if segs and ">" not in cmd and not SUBSHELL.search(cmd) and not WRITE_TOKENS.search(cmd) and all(_readonly(s) for s in segs):
             return "read", ""
         for s in segs:
             prog = (s.split() or [""])[0].rsplit("/", 1)[-1]
