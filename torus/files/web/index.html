@@ -671,17 +671,82 @@ async function viewOp() {
   <div class="card"><label style="margin-top:0" for="op-task">New operator task</label>
     <textarea id="op-task" data-testid="op-task-input" placeholder="e.g. analyse the CSVs in ~/storage/downloads and chart the monthly totals · add a retry to fetcherd · update all packages and re-run the audit"></textarea>
     <input id="op-repos" data-testid="op-repos-input" class="mono" placeholder="GitHub repos this task may read: owner/repo, owner/other (optional)" style="margin-top:8px" ${s.github_key ? "" : 'disabled title="torus key set github"'}>
+    <div class="row" style="margin-top:8px;align-items:center;flex-wrap:wrap">
+      <input type="file" id="op-files" data-testid="op-files-input" multiple style="display:none">
+      <button type="button" id="op-files-pick" data-testid="op-files-pick" onclick="document.getElementById('op-files').click()">＋ Add files</button>
+      <select id="op-dest" data-testid="op-dest-select" style="width:auto"><option value="task">→ task folder</option><option value="project">→ ~/projects/…</option></select>
+      <input id="op-project" data-testid="op-project-input" class="mono" placeholder="project name" style="width:150px;display:none">
+      <label style="margin:0;text-transform:none;display:flex;align-items:center;gap:6px"><input type="checkbox" id="op-unpack" data-testid="op-unpack-check"> unpack zips</label></div>
+    <div id="op-upload-list" data-testid="op-upload-list"></div>
+    <p class="hint" style="margin-top:4px">Files up to 100 MB each, 500 MB per task; zips are kept intact and listed (<code class="k">name.zip.list</code>), "unpack" also extracts them. Task folder = <code class="k">${esc(r.uploads_dir)}/&lt;task&gt;</code> (kept 7 days after the task ends); projects = <code class="k">${esc(r.projects_root)}</code> (permanent). Also: <code class="k">torus upload &lt;file&gt; --task &lt;id&gt;</code>.</p>
     <div class="row" style="margin-top:8px"><select id="op-model" data-testid="op-model-select" style="width:auto"><option value="sonnet" ${s.model==="sonnet"?"selected":""}>Sonnet</option><option value="opus" ${s.model==="opus"?"selected":""}>Opus</option><option value="haiku" ${s.model==="haiku"?"selected":""}>Haiku</option></select>
       <input id="op-budget" data-testid="op-budget-input" type="number" inputmode="decimal" min="0.05" step="0.25" value="${s.default_budget_usd}" style="width:110px" title="budget USD">
       <button class="primary" id="op-plan" data-testid="op-plan-button">Plan</button></div>
     <p class="hint">Claude plans first (what it will read, change, run and roughly cost); nothing happens until you approve. Reads run alone; in-plan changes run with a summary per phase; the danger list and anything off-plan always wait for a tap${s.ask_every_change ? " — <b>and every change too</b> (Settings)" : ""}. Working folder: <code class="k">${esc(s.cwd)}</code>. GitHub: ${s.github_key ? (s.github_scope === "all" ? `token stored, scope <b>all</b> (any repo it can see — Settings)` : `token stored, scope <b>task</b> (only the repos you list above)`) : `no token yet — <code class="k">torus key set github</code> (fine-grained PAT) lets the Operator read repos`}.${r.termux_api ? "" : " Phone tools need Termux:API (F-Droid) + <code class=\"k\">pkg install termux-api</code>."}</p></div>
   <div class="card" data-testid="op-list">${r.tasks.length ? r.tasks.map(t => `<a class="job" href="#/optask/${t.id}" data-testid="op-row"><span class="pill s-${opPill(t.status)}">${esc(opWord(t.status))}</span><div><b>${esc(t.task.slice(0, 120))}</b><div class="hint">${new Date(t.created*1000).toLocaleString()} · ${t.phases} phase(s) · ≈ ${fmtUsd(t.cost || 0)} · ${esc(t.model)}</div></div></a>`).join("") : `<p class="hint" data-testid="op-empty">No operator tasks yet.</p>`}</div>`;
+  $("#op-dest").onchange = () => { $("#op-project").style.display = $("#op-dest").value === "project" ? "" : "none"; };
+  renderUploads();
+  $("#op-files").onchange = async () => {
+    const files = [...$("#op-files").files]; if (!files.length) return;
+    const dest = $("#op-dest").value, project = $("#op-project").value.trim(), unpack = $("#op-unpack").checked;
+    if (dest === "project" && !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$/.test(project)) return toast("Give the project a name first (letters, digits, . _ -)");
+    const total = files.reduce((a, f) => a + f.size, 0);
+    if (files.some(f => f.size > 100 * 1024 * 1024)) return toast("Files are limited to 100 MB each");
+    if (total > 500 * 1024 * 1024) return toast("Pick at most 500 MB per upload");
+    $("#op-plan").disabled = true;
+    for (const f of files) {
+      opUploads.rows.push({name: f.name, size: f.size, done: 0, status: "uploading"});
+      renderUploads();
+      const row = opUploads.rows[opUploads.rows.length - 1];
+      try {
+        const res = await uploadFile(f, {batch: dest === "task" ? opUploads.batch : "", project: dest === "project" ? project : "", unpack}, n => { row.done = n; renderUploads(); });
+        if (dest === "task" && res.batch) { opUploads.batch = res.batch; sessionStorage.setItem("torus_op_batch", res.batch); }
+        Object.assign(row, {status: "done", zip: res.zip, unpacked: res.unpacked, unpacked_to: res.unpacked_to, warning: res.warning, path: res.path});
+        if (dest === "project") { opUploads.project = project; sessionStorage.setItem("torus_op_project", project); }
+      } catch (e) { row.status = "error"; row.error = e.message; }
+      renderUploads();
+    }
+    $("#op-files").value = ""; $("#op-plan").disabled = false;
+  };
   $("#op-plan").onclick = async () => {
     const task = $("#op-task").value.trim(); if (task.length < 3) return toast("Describe the task first");
+    if (opUploads.rows.some(r => r.status === "uploading")) return toast("Wait for the upload to finish");
     $("#op-plan").disabled = true;
-    try { const r2 = await api("/api/op", {task, model: $("#op-model").value, budget_usd: $("#op-budget").value, repos: $("#op-repos").value}); location.hash = "#/optask/" + r2.task.id; }
+    const body = {task, model: $("#op-model").value, budget_usd: $("#op-budget").value, repos: $("#op-repos").value, uploads: opUploads.batch || ""};
+    if (opUploads.project) body.cwd = r.projects_root + "/" + opUploads.project;
+    try { const r2 = await api("/api/op", body); sessionStorage.removeItem("torus_op_batch"); sessionStorage.removeItem("torus_op_project"); opUploads = {batch: "", project: "", rows: []}; location.hash = "#/optask/" + r2.task.id; }
     catch (e) { toast(e.message); $("#op-plan").disabled = false; }
   };
+}
+
+let opUploads = {batch: sessionStorage.getItem("torus_op_batch") || "", project: sessionStorage.getItem("torus_op_project") || "", rows: []};
+const fmtBytes = n => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(0) + " KB" : (n / 1048576).toFixed(1) + " MB";
+function renderUploads() {
+  const el = $("#op-upload-list"); if (!el) return;
+  if (opUploads.batch && !opUploads.rows.length && !opUploads._loaded) {
+    opUploads._loaded = true;
+    api("/api/upload/" + opUploads.batch).then(b => { opUploads.rows = b.files.map(f => ({name: f.name, size: f.size, done: f.size, status: "done", zip: f.zip})); renderUploads(); }).catch(() => {});
+  }
+  el.innerHTML = opUploads.rows.map((r, i) => `<div class="row" style="align-items:center;margin-top:6px" data-testid="op-upload-row">
+    <span class="pill s-${r.status === "done" ? "done" : r.status === "error" ? "error" : "fetching"}">${r.status === "uploading" ? Math.floor(100 * r.done / Math.max(1, r.size)) + "%" : r.status}</span>
+    <div style="flex:1;min-width:0"><b class="mono" style="font-size:13px">${esc(r.name)}</b> <span class="hint">${fmtBytes(r.size)}${r.zip ? ` · zip ${r.zip.files ?? ""}${r.zip.summary ? " " + esc(r.zip.summary) : " files"}` : ""}${r.unpacked !== undefined ? ` · unpacked ${r.unpacked} → ${esc(r.unpacked_to)}` : ""}${r.warning ? ` · <span class="warn">${esc(r.warning)}</span>` : ""}${r.error ? ` · <span class="warn">${esc(r.error)}</span>` : ""}</span>
+      ${r.status === "uploading" ? `<div style="height:4px;background:var(--line);border-radius:2px;margin-top:4px"><div style="height:4px;width:${Math.floor(100 * r.done / Math.max(1, r.size))}%;background:var(--amber);border-radius:2px"></div></div>` : ""}
+      ${r.zip && r.zip.list && r.zip.list.length ? `<details><summary class="hint" style="cursor:pointer">first entries</summary><div class="out" style="max-height:140px">${esc(r.zip.list.join("\n"))}</div></details>` : ""}</div></div>`).join("")
+    + (opUploads.batch ? `<p class="hint" style="margin:6px 0 0" data-testid="op-upload-batch">Batch <code class="k">${esc(opUploads.batch)}</code> becomes the task folder when you press Plan.</p>` : "");
+}
+async function uploadFile(file, opts, onProgress) {
+  const hdr = {"X-Torus": "1", "X-Torus-Token": localStorage.getItem("torus_token") || ""};
+  const b = await api("/api/upload/begin", {name: file.name, size: file.size, batch: opts.batch || "", project: opts.project || "", unpack: !!opts.unpack});
+  let offset = b.offset || 0;
+  while (offset < file.size) {
+    const slice = file.slice(offset, Math.min(file.size, offset + b.chunk));
+    const r = await fetch(`/api/upload/${b.id}/chunk?offset=${offset}`, {method: "POST", headers: {...hdr, "Content-Type": "application/octet-stream"}, body: slice});
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 409 && typeof j.offset === "number") { offset = j.offset; continue; }
+    if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
+    offset = j.offset; onProgress(offset);
+  }
+  return api(`/api/upload/${b.id}/finish`, {});
 }
 
 function opPhaseCard(t, ph, i) {
@@ -712,6 +777,7 @@ async function viewOpTask(id) {
     ${t.stop_reason ? `<p class="warn" data-testid="op-stop-reason">${esc(t.stop_reason)}</p>` : ""}
     ${t.status === "planning" ? `<p class="hint" data-testid="op-planning">Claude is drafting the plan…</p>` : ""}
     ${t.plan_notes ? `<p class="hint">Notes: ${esc(t.plan_notes)}</p>` : ""}
+    ${t.files && t.files.length ? `<details data-testid="op-files"><summary class="hint" style="cursor:pointer">${t.files.length} uploaded file(s) in <code class="k">${esc(t.uploads)}</code></summary><div class="out" style="max-height:200px">${esc(t.files.map(f => `${fmtBytes(f.size).padStart(9)}  ${f.name}${f.zip ? "  (zip: " + f.zip.summary + ")" : ""}`).join("\n"))}</div></details>` : ""}
     ${t.dossier ? `<p class="hint">Saved: <a href="#/doc/${encodeURIComponent("answers/" + t.dossier.split("/").pop())}" data-testid="op-dossier">${esc(t.dossier.split("/").pop())}</a></p>` : ""}</div>
   ${t.status === "plan_ready" ? `<div class="card" data-testid="op-approve-card"><label style="margin-top:0">Approve this plan?</label>
     <p class="hint">${t.phases.length} phase(s), Claude's estimate ≈ ${fmtUsd(t.estimate_usd || 0)}.${t.phases.some(p => p.phone.length) ? ` Phone features: ${esc([...new Set(t.phases.flatMap(p => p.phone))].join(", "))} (Android asks permission the first time each is used).` : ""}</p>

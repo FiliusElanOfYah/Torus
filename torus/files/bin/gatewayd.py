@@ -28,6 +28,7 @@ from urllib.parse import parse_qs, urlparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import httpx  # noqa: E402
 import gateway_code  # noqa: E402
+import gateway_upload  # noqa: E402
 from torus_cite import citation_map, extract_links  # noqa: E402
 import torus_models  # noqa: E402
 import torus_spend  # noqa: E402
@@ -883,6 +884,10 @@ async def route(method, path, query, body, headers=None):
         if not secrets.compare_digest((headers or {}).get("x-torus-token", ""), STATE["token"]):
             return err(401, "Operator needs your TORUS token. Open the page from Termux with: torus open")
         return await api_op(method, path, body)
+    if path.startswith("/api/upload"):
+        if not secrets.compare_digest((headers or {}).get("x-torus-token", ""), STATE["token"]):
+            return err(401, "Uploads need your TORUS token. Open the page from Termux with: torus open")
+        return await gateway_upload.route(method, path, query, body)
     if path == "/api/health":
         nc = STATE["nc"]
         return 200, {"ok": True, "nats": bool(nc and nc.is_connected), "jobs": len(jobs), "running": len(tasks),
@@ -976,14 +981,17 @@ async def handle(reader, writer):
             status, payload = err(404, "not found")
         else:
             raw = await asyncio.wait_for(reader.readexactly(length), 60) if length else b""
-            try:
-                body = json.loads(raw) if raw else {}
-            except ValueError:
-                body = None
-            if not isinstance(body, dict):
-                status, payload = err(400, "body must be a JSON object")
+            if u.path.startswith("/api/upload/") and headers.get("content-type", "").startswith("application/octet-stream"):
+                status, payload = await route(method, u.path, parse_qs(u.query), {"_raw": raw}, headers)
             else:
-                status, payload = await route(method, u.path, parse_qs(u.query), body, headers)
+                try:
+                    body = json.loads(raw) if raw else {}
+                except ValueError:
+                    body = None
+                if not isinstance(body, dict):
+                    status, payload = err(400, "body must be a JSON object")
+                else:
+                    status, payload = await route(method, u.path, parse_qs(u.query), body, headers)
     except Exception:
         log(NAME, "request error\n" + traceback.format_exc())
         status, payload = err(500, "internal error (see torus logs gatewayd)")

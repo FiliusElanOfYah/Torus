@@ -22,6 +22,7 @@
 6 keep 0644 etc/search.conf         H:etc/search.conf
 6 own  0755 bin/gatewayd.py         H:bin/gatewayd.py
 6 own  0644 bin/gateway_code.py     H:bin/gateway_code.py
+6 own  0644 bin/gateway_upload.py   H:bin/gateway_upload.py
 6 own  0644 bin/torus_cite.py       H:bin/torus_cite.py
 6 own  0644 bin/torus_report.py     H:bin/torus_report.py
 6 own  0644 bin/torus_models.py     H:bin/torus_models.py

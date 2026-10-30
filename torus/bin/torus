@@ -62,6 +62,7 @@ torus: your local research assistant
   torus gh repos | tree <owner/repo> [path] [ref] | read <owner/repo> <path> [ref] | search <owner/repo> "<words>"
   torus gh commits|issues|prs <owner/repo> [n] | pr_diff <owner/repo> <n> | clone <owner/repo> [dest] [ref]
   torus gh scope task|all    task = Operator reaches only the repos named in each task (default); all = every repo the token sees
+  torus upload <file...> --task <id> | --project <name> [--unpack]   hand files to a task (~/.torus/uploads/<id>) or a project
   torus llm on|off|status|test|models
   torus llm verify           check the 3 model ids (sonnet/opus/haiku) against Anthropic and fix stale ones
   torus llm model <tier>     default tier: sonnet (answers), opus (code), haiku (fast and cheap)
@@ -394,6 +395,7 @@ case "$cmd" in
   llm) cmd_llm "$@" ;;
   op) cmd_op "$@" ;;
   gh) cmd_gh "$@" ;;
+  upload) [ -n "${1:-}" ] || die "usage: torus upload <file...> --task <id> | --project <name> [--unpack]"; ctl upload "$@" ;;
   search) cmd_search "$@" ;;
   oracle) cmd_oracle "$@" ;;
   audit) cmd_audit "$@" ;;

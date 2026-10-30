@@ -342,6 +342,23 @@ everything else.
 **Honest limits.** Code search runs on default branches only (GitHub's rule). Clones are tarball
 snapshots — fine for reading and editing; to push, Phase 3 adds the write side.
 
+### Handing files to a task (uploads)
+
+On the Operator tab press **＋ Add files** before you press Plan: each file goes up in 8 MB
+chunks with a progress bar (a reload resumes where it stopped). Limits: **100 MB per file,
+500 MB per task**. Where they land:
+
+- **→ task folder** (default): `~/.torus/uploads/<task-id>/`. Claude sees the list (names,
+  sizes, zip contents) in its plan prompt and can read them; the folder is deleted 7 days after
+  the task ends (`uploads_keep_days` in `etc/hardening.conf`, 0 = keep forever).
+- **→ ~/projects/<name>**: straight into a Coder project (permanent); the task's working folder
+  becomes that project.
+
+Zips are **kept intact** and listed next to them as `<name>.zip.list`; tick **unpack zips** to
+extract them too (path escapes, links, >20 000 entries or >1 GB are refused — the zip stays).
+From Termux: `torus upload report.pdf data.csv --task <id>` or
+`torus upload code.zip --project demo --unpack`.
+
 ---
 
 ## Every day

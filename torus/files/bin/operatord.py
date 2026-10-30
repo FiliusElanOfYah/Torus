@@ -28,6 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import torus_github as gh  # noqa: E402
+import gateway_upload as up  # noqa: E402
 from torus_common import (AIRGAP, ETC, VAR, VAULT, atomic_write, get_secret, key_present,  # noqa: E402
                           llm_settings, log, pack, read_conf, run_daemon, slugify, truthy)
 
@@ -136,6 +137,12 @@ def op_settings():
             "github_key": key_present("github")}
 
 
+def uploads_text(t):
+    if not t.get("uploads") or not Path(t["uploads"]).is_dir():
+        return ""
+    return f"\nUploaded files (in {t['uploads']}; zips are kept intact, each has a <name>.list):\n" + (up.files_text(t["uploads"]) or "(none)")
+
+
 def github_repos_text(t):
     """What Claude may reach on GitHub for this task ('' when GitHub is not available to it)."""
     if not t.get("github_key"):
@@ -186,6 +193,14 @@ def load():
             TASKS[t["id"]] = t
         except (ValueError, KeyError):
             continue
+    try:
+        days = int(read_conf(ETC / "hardening.conf").get("uploads_keep_days") or 7)
+    except ValueError:
+        days = 7
+    keep = {x["id"] for x in TASKS.values() if x["status"] in ACTIVE | {"needs_you", "paused", "plan_ready"}}
+    n = up.prune(days, keep)
+    if n:
+        log(NAME, f"pruned {n} upload folder(s) older than {days} days")
     for t in TASKS.values():
         if t["status"] in ACTIVE or t["status"] == "needs_you":
             t["status"], t["pending"] = "interrupted", None
@@ -562,7 +577,7 @@ async def wait_tap(t, action, why):
 async def plan_task(t):
     t["status"] = "planning"
     save(t)
-    msgs = [{"role": "user", "content": f"Task: {t['task']}\nWorking folder: {t['cwd']}" + (f"\nGitHub repos: {', '.join(t['repos'])}" if t.get("repos") else "")}]
+    msgs = [{"role": "user", "content": f"Task: {t['task']}\nWorking folder: {t['cwd']}" + (f"\nGitHub repos: {', '.join(t['repos'])}" if t.get("repos") else "") + uploads_text(t)}]
     repos_text = github_repos_text(t)
     for attempt in range(3):
         text = await llm(t, PLAN_SYSTEM.format(home=TERMUX_HOME, shared=SHARED[0], github=GITHUB_PLAN.format(repos=repos_text) if repos_text else ""), msgs, 3000)
@@ -598,7 +613,7 @@ async def run_phase(t, i, strict, max_steps):
     repos_text = github_repos_text(t)
     system = WORK_SYSTEM.format(n=i + 1, total=len(t["phases"]), title=ph["title"], home=TERMUX_HOME, shared=SHARED[0], cwd=t["cwd"], max_out=MAX_OUT,
                                 github=GITHUB_WORK.format(repos=repos_text) if repos_text else "")
-    context = (f"Task: {t['task']}\n\nApproved plan:\n" + "\n".join(f"{k + 1}. {p['title']} — reads: {'; '.join(p['reads'])} | changes: "
+    context = (f"Task: {t['task']}{uploads_text(t)}\n\nApproved plan:\n" + "\n".join(f"{k + 1}. {p['title']} — reads: {'; '.join(p['reads'])} | changes: "
                f"{'; '.join(p['changes'])} | runs: {'; '.join(p['runs'])}" for k, p in enumerate(t["phases"]))
                + "".join(f"\n\nPhase {k + 1} summary: {p['summary']}" for k, p in enumerate(t["phases"][:i]) if p.get("summary"))
                + f"\n\nNow do phase {i + 1}: {ph['title']}. Start.")
@@ -720,6 +735,8 @@ def write_dossier(t):
              + (f" · GitHub: {', '.join(t['repos'])}" if t.get("repos") else "")]
     if t.get("plan_notes"):
         parts.append(f"\n## Plan notes\n\n{t['plan_notes']}")
+    if t.get("files"):
+        parts.append(f"\n## Uploaded files ({t['uploads']})\n\n" + "\n".join(f"- {f['name']} ({f['size']} bytes)" + (f" · zip: {f['zip']['summary']}" if f.get("zip") else "") for f in t["files"]))
     for i, ph in enumerate(t["phases"]):
         parts.append(f"\n## Phase {i + 1}: {ph['title']} ({ph['status']})\n\n{ph.get('summary') or '(no summary)'}")
         if ph.get("changed"):
@@ -766,10 +783,22 @@ async def on_create(nc, msg, data):
     if repos and not key_present("github"):
         return await reply(nc, msg, {"ok": False, "error": "no GitHub token stored yet: torus key set github"})
     tid = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
+    uploads = ""
+    batch = str(data.get("uploads") or "").strip()
+    if batch:
+        try:
+            src = up.batch_dir(batch)
+        except ValueError as e:
+            return await reply(nc, msg, {"ok": False, "error": str(e)})
+        if src.is_dir():
+            dst = up.UPLOADS / tid
+            os.replace(src, dst)
+            uploads = str(dst)
     t = {"id": tid, "task": task[:2000], "model": model, "budget_usd": budget, "pause_between": bool(data.get("pause_between")),
          "ask_every_change": bool(data.get("ask_every_change")), "cwd": str(cwd.resolve()), "created": time.time(), "status": "planning",
          "phases": [], "phase": 0, "log": [], "cost": 0.0, "calls": 0, "tokens_in": 0, "tokens_out": 0, "pending": None, "stop_reason": "",
-         "repos": repos, "github_scope": conf["github_scope"], "github_key": conf["github_key"]}
+         "repos": repos, "github_scope": conf["github_scope"], "github_key": conf["github_key"],
+         "uploads": uploads, "files": up.listing(Path(uploads)) if uploads else []}
     TASKS[tid] = t
     save(t)
 
@@ -790,7 +819,8 @@ async def on_list(nc, msg, data):
     rows = sorted(TASKS.values(), key=lambda x: x["created"], reverse=True)[:60]
     await reply(nc, msg, {"ok": True, "tasks": [{k: x.get(k) for k in ("id", "task", "status", "created", "cost", "model", "phase", "finished")}
                                                 | {"phases": len(x["phases"])} for x in rows], "settings": op_settings(),
-                          "termux_api": bool(shutil.which("termux-clipboard-get"))})
+                          "termux_api": bool(shutil.which("termux-clipboard-get")),
+                          "uploads_dir": str(up.UPLOADS), "projects_root": str(up.projects_root())})
 
 
 async def on_get(nc, msg, data):

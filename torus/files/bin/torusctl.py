@@ -305,6 +305,30 @@ def cmd_gh(a):
         sys.exit(str(e))
 
 
+def cmd_upload(a):
+    """torus upload <file> [--task <id> | --project <name>] [--unpack]: copy into ~/.torus/uploads/<task> or ~/projects/<name>."""
+    import gateway_upload as up
+    if a.project:
+        if not up.PROJECT_RE.match(a.project):
+            sys.exit("project name: letters, digits, . _ - only")
+        dest = up.projects_root() / a.project
+    elif a.task:
+        dest = up.UPLOADS / a.task
+    else:
+        sys.exit("usage: torus upload <file> --task <id> | --project <name> [--unpack]")
+    for f in a.files:
+        try:
+            r = up.local_copy(f, dest, unpack=a.unpack)
+        except (ValueError, OSError) as e:
+            sys.exit(str(e))
+        line = f"{r['name']}  {r['size']} bytes -> {r['path']}"
+        if r.get("zip"):
+            line += f"  (zip: {r['zip']['files']} files, {r['zip']['total']} bytes; listing {r['zip']['listed']})"
+        if r.get("unpacked") is not None:
+            line += f"  unpacked {r['unpacked']} file(s) into {r['unpacked_to']}"
+        print(line)
+
+
 def cmd_verify(a):
     r = http("POST", "/api/llm/verify", {"fix": not a.check_only})
     for t, info in r["tiers"].items():
@@ -415,6 +439,12 @@ def main():
     s = sub.add_parser("gh")
     s.add_argument("args", nargs="*")
     s.set_defaults(fn=cmd_gh)
+    s = sub.add_parser("upload")
+    s.add_argument("files", nargs="+")
+    s.add_argument("--task")
+    s.add_argument("--project")
+    s.add_argument("--unpack", action="store_true")
+    s.set_defaults(fn=cmd_upload)
     s = sub.add_parser("verify")
     s.add_argument("--check-only", action="store_true")
     s.set_defaults(fn=cmd_verify)
