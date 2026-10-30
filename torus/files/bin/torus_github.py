@@ -26,8 +26,13 @@ REF_RE = re.compile(r"^[A-Za-z0-9_./-]{0,200}$")
 MAX_FILE = 1_000_000
 MAX_TARBALL = 200 * 1024 * 1024
 READ_OPS = ("repos", "tree", "read", "search", "commits", "issues", "prs", "pr_diff")
-CHANGE_OPS = ("clone",)
-OPS = READ_OPS + CHANGE_OPS
+CHANGE_OPS = ("clone", "branch", "commit", "pr", "comment", "push", "revert", "pr_close")
+DANGER_OPS = ("merge", "delete_branch")
+BRANCH_OPS = ("commit", "push", "delete_branch")  # ops whose target branch decides read/change/danger
+OPS = READ_OPS + CHANGE_OPS + DANGER_OPS
+BRANCH_RE = re.compile(r"^(?!/)(?!.*\.\.)(?!.*//)[A-Za-z0-9_./-]{1,200}(?<!\.lock)(?<!/)$")
+MAX_COMMIT_FILES = 40
+MAX_COMMIT_BYTES = 5 * 1024 * 1024
 HEADERS = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "User-Agent": USER_AGENT}
 
 
@@ -78,7 +83,7 @@ def _n(a, default=10, cap=50):
         return default
 
 
-async def call(client, token, method, path, params=None, accept=None, stream_to=None):
+async def call(client, token, method, path, params=None, accept=None, stream_to=None, json_body=None):
     headers = {**HEADERS, "Authorization": f"Bearer {token}"}
     if accept:
         headers["Accept"] = accept
@@ -96,7 +101,7 @@ async def call(client, token, method, path, params=None, accept=None, stream_to=
                         raise GitHubError("tarball is over 200 MB; clone a smaller ref or use git in a shell")
                     stream_to.write(chunk)
                 return r
-        r = await client.request(method, url, params=params, headers=headers, follow_redirects=True)
+        r = await client.request(method, url, params=params, headers=headers, follow_redirects=True, json=json_body)
     except httpx.HTTPError as e:
         raise GitHubError(f"GitHub did not answer ({e.__class__.__name__}): check the connection") from None
     if r.status_code >= 400:
@@ -114,8 +119,13 @@ def _raise(r, path):
     if r.status_code == 403 and r.headers.get("x-ratelimit-remaining") == "0":
         wait = max(0, int(r.headers.get("x-ratelimit-reset") or 0) - int(time.time()))
         raise GitHubError(f"GitHub rate limit hit; try again in {wait // 60 + 1} min")
+    if r.status_code == 403 and "not accessible" in msg.lower():
+        raise GitHubError("the GitHub token lacks a permission for this (edit the fine-grained PAT on github.com: "
+                          "Contents: write for commits/branches, Pull requests: write for PRs, Issues: write for comments)")
     if r.status_code in (403, 404):
         raise GitHubError(f"GitHub says {r.status_code} for {path}: not found, or the token has no access to it ({msg})")
+    if r.status_code == 409:
+        raise GitHubError(f"GitHub conflict (409): {msg}")
     if r.status_code == 422:
         raise GitHubError(f"GitHub refused the request (422): {msg}")
     raise GitHubError(f"GitHub error {r.status_code} for {path}: {msg}")
@@ -266,7 +276,142 @@ async def _run(client, op, a, token, allowed, mode):
         tmp.seek(0)
         n = extract_tarball(tmp, dest)
         return f"cloned {repo}{(' @ ' + ref) if ref else ''}: {n} file(s) into {dest} (snapshot, no .git; no token inside)" + _footer(r)
+
+    # ------------------------------------------------------------ write side (phase 3)
+    if op == "branch":
+        new, src = _branch(a.get("branch")), str(a.get("from") or "").strip()
+        if not src:
+            src = await default_branch(client, token, repo)
+        sha = (await call(client, token, "GET", f"/repos/{repo}/git/ref/heads/{_branch(src)}")).json()["object"]["sha"]
+        r = await call(client, token, "POST", f"/repos/{repo}/git/refs", json_body={"ref": f"refs/heads/{new}", "sha": sha})
+        return f"branch {new} created from {src} @ {sha[:7]}  https://github.com/{repo}/tree/{new}" + _footer(r)
+
+    if op == "commit":
+        branch = _branch(a.get("branch"))
+        message = str(a.get("message") or "").strip()
+        files = a.get("files") or []
+        if not message:
+            raise GitHubError("commit needs a message")
+        if not isinstance(files, list) or not files:
+            raise GitHubError("commit needs files: [{path, content} | {path, delete: true}]")
+        if len(files) > MAX_COMMIT_FILES:
+            raise GitHubError(f"at most {MAX_COMMIT_FILES} files per commit")
+        head = (await call(client, token, "GET", f"/repos/{repo}/git/ref/heads/{branch}")).json()["object"]["sha"]
+        base_tree = (await call(client, token, "GET", f"/repos/{repo}/git/commits/{head}")).json()["tree"]["sha"]
+        tree, total, names = [], 0, []
+        for f in files:
+            path = str(f.get("path") or "").strip().strip("/")
+            if not path or ".." in path.split("/"):
+                raise GitHubError(f"bad file path in commit: {path!r}")
+            if f.get("delete"):
+                tree.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
+                names.append(f"- {path}")
+                continue
+            content = str(f.get("content") if f.get("content") is not None else "")
+            total += len(content.encode())
+            if total > MAX_COMMIT_BYTES:
+                raise GitHubError("commit is over 5 MB of text; split it")
+            blob = (await call(client, token, "POST", f"/repos/{repo}/git/blobs", json_body={"content": content, "encoding": "utf-8"})).json()["sha"]
+            tree.append({"path": path, "mode": "100755" if f.get("executable") else "100644", "type": "blob", "sha": blob})
+            names.append(f"± {path}")
+        tree_sha = (await call(client, token, "POST", f"/repos/{repo}/git/trees", json_body={"base_tree": base_tree, "tree": tree})).json()["sha"]
+        commit = (await call(client, token, "POST", f"/repos/{repo}/git/commits",
+                             json_body={"message": message, "tree": tree_sha, "parents": [head]})).json()
+        r = await call(client, token, "PATCH", f"/repos/{repo}/git/refs/heads/{branch}", json_body={"sha": commit["sha"], "force": False})
+        return (f"commit {commit['sha'][:7]} on {branch}: {message.splitlines()[0][:80]}\n" + "\n".join(names)
+                + f"\nhttps://github.com/{repo}/commit/{commit['sha']}" + _footer(r))
+
+    if op == "pr":
+        title = str(a.get("title") or "").strip()
+        head_b, base = _branch(a.get("head") or a.get("branch")), str(a.get("base") or "").strip()
+        if not title:
+            raise GitHubError("pr needs a title")
+        if not base:
+            base = await default_branch(client, token, repo)
+        r = await call(client, token, "POST", f"/repos/{repo}/pulls",
+                       json_body={"title": title[:250], "head": head_b, "base": _branch(base), "body": str(a.get("body") or "")[:60000], "draft": bool(a.get("draft"))})
+        d = r.json()
+        return f"PR #{d['number']} opened: {d['title']}  {head_b} -> {base}  {d['html_url']}" + _footer(r)
+
+    if op == "comment":
+        num, body_ = _n(a, 0, 10 ** 9), str(a.get("body") or "").strip()
+        if not num or not body_:
+            raise GitHubError("comment needs n (issue/PR number) and body")
+        r = await call(client, token, "POST", f"/repos/{repo}/issues/{num}/comments", json_body={"body": body_[:60000]})
+        return f"comment added on #{num}  {r.json().get('html_url', '')}" + _footer(r)
+
+    if op == "pr_close":
+        num = _n(a, 0, 10 ** 9)
+        if not num:
+            raise GitHubError("pr_close needs n")
+        r = await call(client, token, "PATCH", f"/repos/{repo}/pulls/{num}", json_body={"state": "closed"})
+        return f"PR #{num} closed  {r.json().get('html_url', '')}" + _footer(r)
+
+    if op == "merge":
+        num = _n(a, 0, 10 ** 9)
+        if not num:
+            raise GitHubError("merge needs n")
+        method = str(a.get("method") or "squash")
+        if method not in ("merge", "squash", "rebase"):
+            raise GitHubError("method must be merge, squash or rebase")
+        r = await call(client, token, "PUT", f"/repos/{repo}/pulls/{num}/merge", json_body={"merge_method": method})
+        d = r.json()
+        return f"PR #{num} merged ({method}): {d.get('sha', '')[:7]} {d.get('message', '')}" + _footer(r)
+
+    if op == "delete_branch":
+        branch = _branch(a.get("branch"))
+        if branch == await default_branch(client, token, repo):
+            raise GitHubError(f"{branch} is the default branch; it stays")
+        r = await call(client, token, "DELETE", f"/repos/{repo}/git/refs/heads/{branch}")
+        return f"branch {branch} deleted" + _footer(r)
+
+    if op == "revert":
+        branch = _branch(a.get("branch"))
+        head = (await call(client, token, "GET", f"/repos/{repo}/git/ref/heads/{branch}")).json()["object"]["sha"]
+        c = (await call(client, token, "GET", f"/repos/{repo}/git/commits/{head}")).json()
+        want = str(a.get("sha") or "").strip()
+        if want and not head.startswith(want):
+            raise GitHubError(f"revert only undoes the latest commit on {branch} ({head[:7]}); {want[:7]} is older — ask for a new commit instead")
+        if len(c.get("parents") or []) != 1:
+            raise GitHubError("cannot revert a merge or root commit here")
+        parent = (await call(client, token, "GET", f"/repos/{repo}/git/commits/{c['parents'][0]['sha']}")).json()
+        commit = (await call(client, token, "POST", f"/repos/{repo}/git/commits",
+                             json_body={"message": f"Revert \"{c['message'].splitlines()[0][:70]}\"\n\nThis reverts commit {head}.",
+                                        "tree": parent["tree"]["sha"], "parents": [head]})).json()
+        r = await call(client, token, "PATCH", f"/repos/{repo}/git/refs/heads/{branch}", json_body={"sha": commit["sha"], "force": False})
+        return f"reverted {head[:7]} on {branch} with {commit['sha'][:7]}  https://github.com/{repo}/commit/{commit['sha']}" + _footer(r)
+
+    if op == "push":
+        raise GitHubError("push runs locally (operatord/torusctl handle it)")
     raise GitHubError(f"unknown GitHub op {op}")
+
+
+def _branch(name):
+    name = str(name or "").strip()
+    if not BRANCH_RE.match(name):
+        raise GitHubError(f"bad branch name {name!r}")
+    return name
+
+
+async def default_branch(client, token, repo):
+    return (await call(client, token, "GET", f"/repos/{repo}")).json().get("default_branch") or "main"
+
+
+def push_command(a, askpass):
+    """argv + env for `git push` from a local clone, token supplied by the askpass helper (never on disk)."""
+    remote, branch = str(a.get("remote") or "origin").strip(), str(a.get("branch") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,60}", remote) or (branch and not BRANCH_RE.match(branch)):
+        raise GitHubError("push: bad remote or branch name")
+    argv = ["git", "push"]
+    if a.get("force"):
+        argv.append("--force-with-lease")
+    if a.get("set_upstream") or a.get("u"):
+        argv.append("-u")
+    argv.append(remote)
+    if branch:
+        argv.append(f"HEAD:{branch}" if a.get("head") else branch)
+    env = {"GIT_ASKPASS": str(askpass), "GIT_TERMINAL_PROMPT": "0", "TORUS_ASKPASS_KEY": "github"}
+    return argv, env
 
 
 def extract_tarball(fileobj, dest):

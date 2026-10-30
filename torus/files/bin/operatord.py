@@ -101,8 +101,9 @@ PLAN_SYSTEM = (
     'battery wifi device open camera record sms_send sms_list location contacts"]}}],"estimate_usd":0.25,"notes":"risks, questions"}}\n'
     "2-6 phases. Be concrete: name files and commands. Estimate the Claude cost from the reads you need. You cannot touch "
     "~/.torus/airgap, the seal or gateway.token; say so in notes if the task needs them.{github}")
-GITHUB_PLAN = ("\nGitHub: a github tool is available (repos, tree, read, search, commits, issues, prs, pr_diff, clone) for {repos}; "
-               "name the repos and files you will read in `reads` and any clone in `changes`.")
+GITHUB_PLAN = ("\nGitHub: a github tool is available for {repos}: reads (repos, tree, read, search, commits, issues, prs, pr_diff) and "
+               "writes (clone, branch, commit, pr, comment, revert, pr_close; merge and delete_branch always need the user's tap; commits "
+               "straight to the default branch need a tap, so prefer a branch + PR). Name repos, files, branches and PRs in `reads`/`changes`.")
 WORK_SYSTEM = (
     "You are TORUS Operator executing phase {n} of {total} ({title}) of an approved plan inside Termux on the user's Android "
     "phone (aarch64, bash, Python 3, no root, no sudo; pkg install / pip install; home {home}; shared storage {shared}; "
@@ -117,7 +118,14 @@ WORK_SYSTEM = (
     "Outputs are trimmed to {max_out} characters; ask for smaller slices (head/tail/grep) instead of whole big files. "
     "If an action is denied, continue without it or finish the phase explaining what is missing.")
 GITHUB_WORK = (' | {{"tool":"github","op":"repos|tree|read|search|commits|issues|prs|pr_diff|clone","repo":"owner/name",'
-               '"path":"","ref":"","q":"","n":10,"state":"open","dest":"folder for clone"}}  (GitHub, repos: {repos})')
+               '"path":"","ref":"","q":"","n":10,"state":"open","dest":"folder for clone"}} | '
+               '{{"tool":"github","op":"branch","repo":"owner/name","branch":"new-branch","from":"main"}} | '
+               '{{"tool":"github","op":"commit","repo":"owner/name","branch":"branch","message":"why","files":[{{"path":"a.py","content":"ENTIRE file"}},{{"path":"old.txt","delete":true}}]}} | '
+               '{{"tool":"github","op":"pr","repo":"owner/name","head":"branch","base":"main","title":"...","body":"...","draft":false}} | '
+               '{{"tool":"github","op":"comment|pr_close|merge","repo":"owner/name","n":12,"body":"..."}} | '
+               '{{"tool":"github","op":"revert|delete_branch","repo":"owner/name","branch":"branch"}} | '
+               '{{"tool":"github","op":"push","repo":"owner/name","path":"local git clone","branch":"branch","remote":"origin"}}'
+               '  (GitHub, repos: {repos}. Writes need a branch; the default branch, merge, delete_branch and force need the user\'s tap)')
 
 
 # ---------------------------------------------------------------- settings / state
@@ -289,8 +297,29 @@ def classify(action, plan_words, strict):
             return "blocked", "repo must look like owner/name"
         elif not gh.in_scope(repo, action.get("_repos") or [], mode):
             return "blocked", f"{repo} is not in this task's repo list (add it to the task, or Settings → GitHub scope: all)"
-        if op != "clone":
+        if op in gh.READ_OPS:
             return "read", ""
+        if op in gh.DANGER_OPS:
+            return "danger", {"merge": f"merges PR #{action.get('n')} in {repo}", "delete_branch": f"deletes branch {action.get('branch')} in {repo}"}[op]
+        if op == "push":
+            try:
+                p = resolve(action.get("path") or "", action.get("_cwd", TERMUX_HOME))
+            except (OSError, ValueError):
+                return "blocked", "bad clone path"
+            if is_protected(p) or not in_reach(p):
+                return "blocked", f"{p} is outside the Termux home"
+            if action.get("force"):
+                return "danger", f"force-pushes {action.get('branch') or 'HEAD'} to {repo}"
+            if action.get("_default") and action.get("branch") == action["_default"]:
+                return "danger", f"pushes straight to the default branch {action['_default']} of {repo}"
+            return ("danger" if strict else "change"), f"pushes {action.get('branch') or 'the current branch'} from {p} to {repo}"
+        if op == "commit" and action.get("_default") and action.get("branch") == action["_default"]:
+            return "danger", f"commits straight to the default branch {action['_default']} of {repo}"
+        if op != "clone":
+            why = {"branch": f"creates branch {action.get('branch')} in {repo}", "commit": f"commits {len(action.get('files') or [])} file(s) to {action.get('branch')} in {repo}",
+                   "pr": f"opens a pull request in {repo}", "comment": f"comments on #{action.get('n')} in {repo}", "revert": f"reverts the latest commit on {action.get('branch')} in {repo}",
+                   "pr_close": f"closes PR #{action.get('n')} in {repo}"}[op]
+            return ("danger" if strict else "change"), why
         try:
             p = resolve(action.get("dest") or action.get("path") or "", action.get("_cwd", TERMUX_HOME))
         except (OSError, ValueError):
@@ -394,11 +423,11 @@ def manifest(cwd, limit=5000):
     return out
 
 
-async def run_shell(cmd, cwd, timeout):
+async def run_shell(cmd, cwd, timeout, env=None):
     timeout = max(5, min(900, int(timeout or 120)))
     try:
         proc = await asyncio.create_subprocess_shell(cmd, cwd=cwd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-                                                     env={**os.environ, "TORUS_OPERATOR": "1"})
+                                                     env={**os.environ, "TORUS_OPERATOR": "1", **(env or {})})
     except OSError as e:
         return f"could not start: {e}", -1
     try:
@@ -470,6 +499,20 @@ async def run_tool(t, phase, action):
             return "no GitHub token stored: torus key set github", False
         op = str(action.get("op") or "")
         a = dict(action)
+        if op == "push":
+            p = resolve(action.get("path") or "", cwd)
+            if not (p / ".git").exists():
+                return f"{p} is not a git clone (no .git); use commit for tarball snapshots", False
+            try:
+                argv, env = gh.push_command(a, Path(__file__).with_name("torus_askpass.py"))
+            except gh.GitHubError as e:
+                return str(e), False
+            import shlex
+            out, rc = await run_shell(" ".join(shlex.quote(x) for x in argv), str(p), 300, env)
+            if rc == 0:
+                t["phases"][phase].setdefault("github", []).append({"op": "push", "repo": action.get("repo"), "text": f"pushed {action.get('branch') or 'HEAD'}",
+                                                                   "url": f"https://github.com/{action.get('repo')}/tree/{action.get('branch') or ''}".rstrip("/")})
+            return f"[exit {rc}]\n{out}", rc == 0
         if op == "clone":
             dest = resolve(action.get("dest") or action.get("path") or "", cwd)
             a["_dest"] = str(dest)
@@ -480,8 +523,26 @@ async def run_tool(t, phase, action):
             return str(e), False
         if op == "clone":
             t["phases"][phase].setdefault("cloned", []).append(str(a["_dest"]))
+        elif op not in gh.READ_OPS:
+            url = re.search(r"https://github\.com/\S+", out)
+            t["phases"][phase].setdefault("github", []).append({"op": op, "repo": action.get("repo"), "text": out.splitlines()[0][:160], "url": url.group(0) if url else ""})
         return out, True
     return f"unknown tool {tool}", False
+
+
+async def github_default(t, repo):
+    """Default branch of repo (cached on the task) so writes to it can be escalated to danger before they run."""
+    cache = t.setdefault("gh_default", {})
+    if repo in cache:
+        return cache[repo]
+    try:
+        import httpx
+        token = await get_secret("github")
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60, connect=15)) as client:
+            cache[repo] = await gh.default_branch(client, token, repo)
+    except Exception:
+        cache[repo] = "main"
+    return cache[repo]
 
 
 # ---------------------------------------------------------------- Claude
@@ -543,7 +604,7 @@ def sentence(action, why):
     if tool == "phone":
         return f"Phone: {action.get('feature')} {json.dumps(action.get('args') or {})[:200]} — {why}."
     if tool == "github":
-        return f"GitHub {action.get('op')} {action.get('repo') or ''} {action.get('path') or action.get('dest') or ''} — {why}."
+        return f"GitHub {action.get('op')} {action.get('repo') or ''} {action.get('branch') or action.get('path') or action.get('dest') or (('#' + str(action.get('n'))) if action.get('n') else '')} — {why}."
     return f"{tool} — {why}."
 
 
@@ -552,7 +613,7 @@ def action_label(action):
     if tool == "shell":
         return action.get("cmd")
     if tool == "github":
-        return f"github {action.get('op')} {action.get('repo') or ''} {action.get('path') or action.get('q') or action.get('dest') or ''}".rstrip()
+        return f"github {action.get('op')} {action.get('repo') or ''} {action.get('branch') or action.get('path') or action.get('q') or action.get('dest') or (('#' + str(action.get('n'))) if action.get('n') and action.get('op') not in ('commits', 'issues', 'prs') else '')}".rstrip()
     return f"{tool} {action.get('path') or action.get('feature') or ''}"
 
 
@@ -641,11 +702,13 @@ async def run_phase(t, i, strict, max_steps):
             action["_cwd"] = t["cwd"]
             if action.get("tool") == "github":
                 action["_repos"], action["_gh_scope"], action["_github_key"] = t.get("repos") or [], t.get("github_scope") or "task", bool(t.get("github_key"))
+                if action.get("op") in gh.BRANCH_OPS and gh.REPO_RE.match(str(action.get("repo") or "")) and gh.in_scope(action["repo"], action["_repos"], action["_gh_scope"]):
+                    action["_default"] = await github_default(t, action["repo"])
             if action.get("tool") == "phone" and action.get("feature") in t.get("disabled_phone", []):
                 results.append(f"{action.get('feature')}: permission denied earlier; tool is off for this task")
                 continue
             level, why = classify(action, plan_words, strict)
-            for k in ("_cwd", "_repos", "_gh_scope", "_github_key"):
+            for k in ("_cwd", "_repos", "_gh_scope", "_github_key", "_default"):
                 action.pop(k, None)
             label = action_label(action)
             if level == "blocked":
@@ -745,6 +808,8 @@ def write_dossier(t):
             parts.append("\nFiles changed by commands (not undoable):\n" + "\n".join(f"- {p}" for p in ph["shell_changed"][:50]))
         if ph.get("cloned"):
             parts.append("\nGitHub clones (snapshots without .git):\n" + "\n".join(f"- {p}" for p in ph["cloned"]))
+        if ph.get("github"):
+            parts.append("\nGitHub writes:\n" + "\n".join(f"- {g['op']} {g['repo']}: {g['text']}" + (f" <{g['url']}>" if g.get("url") else "") for g in ph["github"]))
         for d in ph.get("diffs") or []:
             parts.append(f"\n```diff\n{d['diff'][:6000]}\n```")
     parts.append("\n## Log\n\n" + "\n".join(f"- {time.strftime('%H:%M:%S', time.localtime(e['t']))} {e['kind']}: {e['text'][:300]}"

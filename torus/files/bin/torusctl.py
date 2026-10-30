@@ -276,7 +276,11 @@ def cmd_gh(a):
     args = list(a.args)
     op = args[0] if args else ""
     usage = ("usage: torus gh repos | tree <owner/repo> [path] [ref] | read <owner/repo> <path> [ref] | search <owner/repo|-> \"<words>\" | "
-             "commits|issues|prs <owner/repo> [n] | pr_diff <owner/repo> <n> | clone <owner/repo> [dest] [ref]")
+             "commits|issues|prs <owner/repo> [n] | pr_diff <owner/repo> <n> | clone <owner/repo> [dest] [ref]\n"
+             "       torus gh branch <owner/repo> <new> [from] | commit <owner/repo> <branch> \"<message>\" <file>[:<repo path>]... | "
+             "pr <owner/repo> <head> [base] \"<title>\" | comment <owner/repo> <n> \"<text>\" | pr_close <owner/repo> <n> | "
+             "merge <owner/repo> <n> [squash|merge|rebase] | revert <owner/repo> <branch> | delete_branch <owner/repo> <branch> | "
+             "push <clone dir> [branch] [remote]")
     if op not in gh.OPS:
         sys.exit(usage)
     act = {"op": op}
@@ -287,13 +291,46 @@ def cmd_gh(a):
             act.update(repo="" if args[1] == "-" else args[1], q=" ".join(args[2:]))
         elif op in ("commits", "issues", "prs"):
             act.update(repo=args[1], n=args[2] if len(args) > 2 else 10)
-        elif op == "pr_diff":
+        elif op in ("pr_diff", "pr_close"):
             act.update(repo=args[1], n=args[2])
         elif op == "clone":
             dest = args[2] if len(args) > 2 else os.path.join(os.path.expanduser("~/projects"), args[1].split("/")[-1])
             act.update(repo=args[1], _dest=os.path.abspath(os.path.expanduser(dest)), ref=args[3] if len(args) > 3 else "")
+        elif op == "branch":
+            act.update(repo=args[1], branch=args[2], **({"from": args[3]} if len(args) > 3 else {}))
+        elif op == "commit":
+            files = []
+            for spec in args[4:]:
+                local, _, remote = spec.partition(":")
+                p = os.path.expanduser(local)
+                files.append({"path": remote or os.path.basename(p), "content": open(p, encoding="utf-8", errors="replace").read(),
+                              "executable": os.access(p, os.X_OK)})
+            if not files:
+                sys.exit(usage)
+            act.update(repo=args[1], branch=args[2], message=args[3], files=files)
+        elif op == "pr":
+            if len(args) == 4:
+                act.update(repo=args[1], head=args[2], title=args[3])
+            else:
+                act.update(repo=args[1], head=args[2], base=args[3], title=args[4])
+        elif op == "comment":
+            act.update(repo=args[1], n=args[2], body=" ".join(args[3:]))
+        elif op == "merge":
+            act.update(repo=args[1], n=args[2], method=args[3] if len(args) > 3 else "squash")
+        elif op in ("revert", "delete_branch"):
+            act.update(repo=args[1], branch=args[2])
+        elif op == "push":
+            import subprocess
+            d = os.path.abspath(os.path.expanduser(args[1]))
+            argv, env = gh.push_command({"branch": args[2] if len(args) > 2 else "", "remote": args[3] if len(args) > 3 else "origin"},
+                                        os.path.join(os.path.dirname(os.path.abspath(__file__)), "torus_askpass.py"))
+            sys.exit(subprocess.call(argv, cwd=d, env={**os.environ, **env}))
     except IndexError:
         sys.exit(usage)
+    except OSError as e:
+        sys.exit(str(e))
+    except gh.GitHubError as e:
+        sys.exit(str(e))
 
     async def go():
         from torus_common import get_secret

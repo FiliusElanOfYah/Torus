@@ -38,4 +38,5 @@
 9 own  0755 bin/torus_export.py     H:bin/torus_export.py
 10 own  0755 bin/operatord.py        H:bin/operatord.py
 10 own  0644 bin/torus_github.py     H:bin/torus_github.py
+10 own  0755 bin/torus_askpass.py    H:bin/torus_askpass.py
 10 keep 0644 etc/operator.conf       H:etc/operator.conf

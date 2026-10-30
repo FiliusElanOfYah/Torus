@@ -340,7 +340,26 @@ lands in a clone, a log or a dossier; file reads are capped at 1 MB and outputs 
 everything else.
 
 **Honest limits.** Code search runs on default branches only (GitHub's rule). Clones are tarball
-snapshots — fine for reading and editing; to push, Phase 3 adds the write side.
+snapshots — fine for reading and editing; `torus gh push` works from a real `git clone`.
+
+### Operator on GitHub (write side)
+
+With *Contents: write*, *Pull requests: write* (and *Issues: write* for comments) on the PAT, the
+Operator can also: `branch`, `commit` (one commit, up to 40 files, via the Git Data API), `pr`,
+`comment`, `pr_close`, `revert` (undoes the latest commit on a branch), `push` (from a real git
+clone — the token is handed to git by `torus_askpass.py` and never written to disk), `merge`,
+`delete_branch`. How they are gated:
+
+| action | level |
+|---|---|
+| branch, commit to a feature branch, pr, comment, pr_close, revert, push to a feature branch | **change** (in-plan: runs with the phase summary; strict mode: tap) |
+| commit or push to the **default branch**, force push, **merge**, **delete_branch** | **danger** — always a tap, with the sentence |
+| deleting repos, settings, secrets, collaborators | **blocked** — not in the tool |
+
+Every write lands in the phase card as a link (commit / PR). Undo for GitHub writes is `revert`
+and `pr_close` — the local **Undo phase** button restores files on the phone only. From Termux:
+`torus gh branch o/r fix-x`, `torus gh commit o/r fix-x "msg" ./a.py:src/a.py`,
+`torus gh pr o/r fix-x "title"`, `torus gh push ~/projects/r fix-x`, `torus gh merge o/r 12`.
 
 ### Handing files to a task (uploads)
 

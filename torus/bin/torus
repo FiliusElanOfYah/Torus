@@ -61,6 +61,8 @@ torus: your local research assistant
   torus op list|show|follow|approve|yes|no|stop|resume <id> | undo <id> <phase> | strict on|off | budget <usd>
   torus gh repos | tree <owner/repo> [path] [ref] | read <owner/repo> <path> [ref] | search <owner/repo> "<words>"
   torus gh commits|issues|prs <owner/repo> [n] | pr_diff <owner/repo> <n> | clone <owner/repo> [dest] [ref]
+  torus gh branch <owner/repo> <new> [from] | commit <owner/repo> <branch> "<msg>" <file>[:<path>]... | pr <owner/repo> <head> [base] "<title>"
+  torus gh comment <owner/repo> <n> "<text>" | pr_close|merge <owner/repo> <n> | revert|delete_branch <owner/repo> <branch> | push <dir> [branch]
   torus gh scope task|all    task = Operator reaches only the repos named in each task (default); all = every repo the token sees
   torus upload <file...> --task <id> | --project <name> [--unpack]   hand files to a task (~/.torus/uploads/<id>) or a project
   torus llm on|off|status|test|models

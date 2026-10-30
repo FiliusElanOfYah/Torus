@@ -759,6 +759,7 @@ function opPhaseCard(t, ph, i) {
     ${ph.summary ? `<div class="answer" data-testid="op-phase-summary-${i}" style="margin-top:8px">${md(ph.summary)}</div>` : ""}
     ${(ph.diffs || []).map(d => `<p class="hint" style="margin:8px 0 2px">${esc(d.path)}</p>${diffHtml(d.diff)}`).join("")}
     ${ph.shell_changed && ph.shell_changed.length ? `<p class="hint">Changed by commands (not undoable): ${esc(ph.shell_changed.slice(0, 20).join(", "))}${ph.shell_changed.length > 20 ? " …" : ""}</p>` : ""}
+    ${ph.github && ph.github.length ? `<p class="hint" data-testid="op-phase-github-${i}">GitHub: ${ph.github.map(g => g.url ? `<a href="${esc(g.url)}" target="_blank" rel="noopener">${esc(g.op)} ${esc(g.repo || "")}</a>` : esc(g.op + " " + (g.repo || ""))).join(" · ")} <span class="hint">(on GitHub; undo with revert / pr_close, not with Undo phase)</span></p>` : ""}
     ${ph.status === "done" && ph.changed && ph.changed.length && !ph.undone && !["planning", "running", "needs_you"].includes(t.status) ? `<div class="row" style="margin-top:8px"><button data-act="undo" data-phase="${i}" data-testid="op-undo-${i}">Undo phase ${i + 1} (${ph.changed.length} file${ph.changed.length === 1 ? "" : "s"})</button></div>` : ""}
   </details>`;
 }
