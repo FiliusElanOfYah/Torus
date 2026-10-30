@@ -209,3 +209,38 @@ def test_wiring():
     assert r.returncode == 0, r.stderr
     r = subprocess.run(["bash", "-n", str(t / "phases" / "11-hooks.sh")], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+def test_auto_rule_marks_task_readonly_and_post_target():
+    (HOME / "etc" / "hooks.yaml").write_text('rules:\n  - event: issues\n    action: opened\n    auto: true\n    task: "Investigate #{number}: {title}"\n')
+    payload = {"action": "opened", "repository": {"full_name": "owner/demo"}, "sender": {"login": "ann"}, "issue": {"number": 9, "title": "Crash", "body": "trace"}}
+    st, r = deliver("issues", payload, delivery="a-1")
+    assert st == 200 and r["created"] == [{"rule": "issues", "task": "t-1", "auto": True}]
+    body = hookd.NC["nc"].created[0]
+    assert body["auto_readonly"] is True and body["post_to"] == {"repo": "owner/demo", "n": 9} and body["task"] == "Investigate #9: Crash"
+    (HOME / "etc" / "hooks.yaml").write_text('rules:\n  - event: issues\n    task: "x"\n')
+    deliver("issues", payload, delivery="a-2")
+    assert hookd.NC["nc"].created[1]["auto_readonly"] is False and hookd.NC["nc"].created[1]["post_to"] is None
+
+
+def test_gateway_rules_endpoint_validates_yaml():
+    import gatewayd
+    gatewayd.ETC = HOME / "etc"
+    gatewayd.STATE["token"] = "tok"
+    H = {"x-torus-token": "tok"}
+    st, r = asyncio.run(gatewayd.route("GET", "/api/hooks/rules", {}, {}, {"x-torus-token": "nope"}))
+    assert st == 401
+    st, r = asyncio.run(gatewayd.route("GET", "/api/hooks/rules", {}, {}, H))
+    assert st == 200 and "@torus" in r["yaml"]
+    st, r = asyncio.run(gatewayd.route("POST", "/api/hooks/rules", {}, {"yaml": "rules: [{event: push}]"}, H))
+    assert st == 400 and "rule 1 needs" in r["error"]
+    st, r = asyncio.run(gatewayd.route("POST", "/api/hooks/rules", {}, {"yaml": ": : ["}, H))
+    assert st == 400 and "YAML" in r["error"]
+    st, r = asyncio.run(gatewayd.route("POST", "/api/hooks/rules", {}, {"yaml": "nope: 1"}, H))
+    assert st == 400
+    good = 'rules:\n  - event: push\n    branch: main\n    task: "Push to {branch}"'
+    st, r = asyncio.run(gatewayd.route("POST", "/api/hooks/rules", {}, {"yaml": good}, H))
+    assert st == 200 and r["yaml"] == good + "\n" and (HOME / "etc" / "hooks.yaml").read_text() == good + "\n"
+    assert [x["task"] for x in hookd.load_rules()] == ["Push to {branch}"]
+    web = (ROOT / "torus" / "files" / "web" / "index.html").read_text()
+    assert 'data-testid="hooks-rules-input"' in web and 'data-testid="hooks-rules-save"' in web and "/api/hooks/rules" in web

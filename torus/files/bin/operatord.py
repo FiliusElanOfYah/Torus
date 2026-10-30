@@ -711,6 +711,8 @@ async def run_phase(t, i, strict, max_steps):
                 results.append(f"{action.get('feature')}: permission denied earlier; tool is off for this task")
                 continue
             level, why = classify(action, plan_words, strict)
+            if t.get("readonly") and level != "read":
+                level, why = "blocked", f"read-only task (webhook auto rule): {why or 'would change something'}"
             for k in ("_cwd", "_repos", "_gh_scope", "_github_key", "_default"):
                 action.pop(k, None)
             label = action_label(action)
@@ -782,6 +784,8 @@ async def run_task(t):
             if ph["status"] == "running":
                 ph["status"] = "interrupted"
         write_dossier(t)
+        if t.get("post_to") and t["status"] == "done":
+            await post_findings(t)
         save(t)
         RUN.pop(t["id"], None)
         if wake:
@@ -790,6 +794,19 @@ async def run_task(t):
             import shlex
             await run_shell(f"termux-notification --title {shlex.quote('TORUS Operator')} --content "
                             f"{shlex.quote(t['status'] + ': ' + t['task'][:80])} --id torus-op", t["cwd"], 10)
+
+
+async def post_findings(t):
+    """Read-only webhook tasks: leave the phase summaries as a comment on the issue/PR that triggered them."""
+    pt = t["post_to"]
+    body = "**TORUS Operator** (read-only, auto rule) — findings:\n\n" + "\n\n".join(
+        f"**{ph['title']}**\n{ph.get('summary') or '(no summary)'}" for ph in t["phases"]) + f"\n\n_≈ ${t['cost']:.4f}, {t.get('calls', 0)} Claude calls; nothing was changed._"
+    try:
+        token = await get_secret("github")
+        out = await gh.run("comment", {"repo": pt["repo"], "n": pt["n"], "body": body[:60000]}, token, [pt["repo"]], "all")
+        entry(t, "note", f"findings posted: {out}")
+    except Exception as e:
+        entry(t, "note", f"could not post findings to {pt['repo']}#{pt['n']}: {e}")
 
 
 def write_dossier(t):
@@ -1022,7 +1039,11 @@ async def create_task(data):
          "ask_every_change": bool(data.get("ask_every_change")), "cwd": str(cwd.resolve()), "created": time.time(), "status": "planning",
          "phases": [], "phase": 0, "log": [], "cost": 0.0, "calls": 0, "tokens_in": 0, "tokens_out": 0, "pending": None, "stop_reason": "",
          "repos": repos, "github_scope": conf["github_scope"], "github_key": conf["github_key"],
-         "uploads": uploads, "files": up.listing(Path(uploads)) if uploads else []}
+         "uploads": uploads, "files": up.listing(Path(uploads)) if uploads else [],
+         "readonly": bool(data.get("auto_readonly")), "source": str(data.get("source") or "you")}
+    pt = data.get("post_to") if t["readonly"] else None
+    if isinstance(pt, dict) and gh.REPO_RE.match(str(pt.get("repo") or "")) and str(pt.get("n") or "").isdigit():
+        t["post_to"] = {"repo": pt["repo"], "n": int(pt["n"])}
     TASKS[tid] = t
     save(t)
 
@@ -1033,8 +1054,15 @@ async def create_task(data):
             t["status"], t["stop_reason"] = "error", f"{e.__class__.__name__}: {e}" if not isinstance(e, BudgetStop) else str(e)
             entry(t, "error", t["stop_reason"])
             save(t)
-        finally:
             RUN.pop(tid, None)
+            return
+        if t["readonly"]:
+            t["status"] = "running"
+            entry(t, "tap", "auto-approved: read-only webhook rule (every change is blocked, findings are posted back)")
+            save(t)
+            RUN[tid] = asyncio.create_task(run_task(t))
+            return
+        RUN.pop(tid, None)
     start(t, go())
     return True, {"task": public(t)}
 

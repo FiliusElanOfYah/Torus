@@ -5,6 +5,8 @@
 #                            comment/issue text), label
 # placeholders for `task`:   {repo} {number} {title} {body} {branch} {html_url} {sender} {workflow} {conclusion} {action}
 # `repos`: the GitHub repos the task may reach (default: the repo the event came from). `stop: false` lets later rules match too.
+# `auto: true`: no approval tap — the task runs READ-ONLY (every write/command that changes something is blocked) and its
+#               findings are posted as a comment on the issue/PR that triggered it (needs Issues: write on the PAT).
 rules:
   - name: "@torus in an issue or PR comment"
     event: issue_comment

@@ -406,8 +406,12 @@ rules:
 
 Events: `push pull_request issues issue_comment workflow_run check_run release`. Each match
 creates an Operator task (repos = the event's repo unless the rule lists `repos`). **Every webhook
-task still waits for your plan-approval tap** — nothing runs because a stranger commented.
-Settings → *Webhooks* shows the secret/tunnel state and the last deliveries.
+task waits for your plan-approval tap** — nothing runs because a stranger commented — unless the
+rule says **`auto: true`**: then the plan is approved automatically but the task runs **read-only**
+(every write, delete, changing command or GitHub write is blocked, no tap asked) and its phase
+summaries are posted as a comment on the issue/PR that triggered it (PAT needs *Issues: write*).
+Settings → *Webhooks* shows the secret/tunnel state, the last deliveries, and an **Edit rules**
+box that validates and saves `hooks.yaml` (hookd picks it up on the next delivery).
 
 **Honest limits.** The phone must be online and Termux awake (wake-lock, battery optimisation
 off — Step 7). Deliveries that arrive while it is offline are not retried by GitHub automatically

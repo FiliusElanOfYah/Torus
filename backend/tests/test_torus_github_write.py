@@ -336,3 +336,56 @@ def test_wiring():
     assert 'data-testid="op-phase-github-${i}"' in web
     r = subprocess.run(["bash", "-n", str(ROOT / "torus" / "bin" / "torus")], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+def test_readonly_auto_task_blocks_changes_and_posts_findings(monkeypatch):
+    """A webhook auto rule: plan auto-approved, every change blocked (no tap), findings commented on the issue."""
+    script = iter([
+        json.dumps({"phases": [{"title": "Investigate", "reads": ["README.md"], "changes": [], "runs": []}], "estimate_usd": 0.05}),
+        json.dumps({"say": "looking", "actions": [{"tool": "github", "op": "tree", "repo": "owner/demo"},
+                                                  {"tool": "write", "path": "fix.txt", "content": "x"},
+                                                  {"tool": "github", "op": "commit", "repo": "owner/demo", "branch": "fix", "message": "m", "files": [{"path": "a", "content": "b"}]}]}),
+        json.dumps({"phase_done": True, "summary": "The retry loop never backs off."}),
+    ])
+
+    async def fake_llm(t, system, messages, max_tokens=4096):
+        return next(script)
+
+    async def fake_secret(name):
+        return TOKEN
+
+    async def never_tap(t, action, why):
+        raise AssertionError("read-only tasks must not ask for taps")
+    monkeypatch.setattr(op, "llm", fake_llm)
+    monkeypatch.setattr(op, "get_secret", fake_secret)
+    monkeypatch.setattr(op, "wait_tap", never_tap)
+    monkeypatch.setattr(gh, "_run", _run_tree_ok(gh._run))
+    nc = FakeNC()
+
+    async def flow():
+        await op.on_create(nc, Msg(), {"task": "investigate the retry bug", "repos": "owner/demo", "source": "webhook", "auto_readonly": True, "post_to": {"repo": "owner/demo", "n": 7}})
+        assert nc.out[-1]["ok"], nc.out[-1]
+        t = op.TASKS[nc.out[-1]["task"]["id"]]
+        for _ in range(300):
+            if t["status"] in ("done", "error", "stopped") and t["id"] not in op.RUN:
+                break
+            await asyncio.sleep(0.02)
+        return t
+    t = asyncio.run(flow())
+    assert t["status"] == "done", t.get("stop_reason")
+    assert t["readonly"] and t["post_to"] == {"repo": "owner/demo", "n": 7} and t["source"] == "webhook"
+    kinds = [(e["kind"], e["text"]) for e in t["log"]]
+    assert any(k == "tap" and x.startswith("auto-approved") for k, x in kinds)
+    blocked = [x for k, x in kinds if k == "blocked"]
+    assert len(blocked) == 2 and all("read-only task" in x for x in blocked)
+    assert not (WORK / "fix.txt").exists() and STATE["refs"]["fix"] == "bbb222"
+    assert STATE["comments"][-1][0] == "/repos/owner/demo/issues/7/comments" and "never backs off" in STATE["comments"][-1][1]["body"]
+    assert any(k == "note" and x.startswith("findings posted") for k, x in kinds)
+
+
+def _run_tree_ok(orig):
+    async def run(client, op_, a, token, allowed, mode):
+        if op_ == "tree":
+            return "d 0 src\n- 20 README.md"
+        return await orig(client, op_, a, token, allowed, mode)
+    return run

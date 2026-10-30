@@ -120,8 +120,9 @@ def record(ev):
         pass
 
 
-async def create_task(text, repos):
-    msg = await NC["nc"].request("torus.op.create", pack({"task": text, "repos": repos, "source": "webhook"}), timeout=20)
+async def create_task(text, repos, auto=False, post_to=None):
+    body = {"task": text, "repos": repos, "source": "webhook", "auto_readonly": bool(auto), "post_to": post_to if auto else None}
+    msg = await NC["nc"].request("torus.op.create", pack(body), timeout=20)
     res = json.loads(msg.data)
     if not res.get("ok"):
         raise RuntimeError(res.get("error") or "operatord refused")
@@ -160,9 +161,11 @@ async def handle_github(headers, body):
         if not matches(rule, f):
             continue
         repos = rule.get("repos") or ([f["repo"]] if f["repo"] else [])
+        auto = bool(rule.get("auto"))
+        post_to = {"repo": f["repo"], "n": int(f["number"])} if auto and f["repo"] and f["number"].isdigit() else None
         try:
-            tid = await create_task(render(rule["task"], f), repos)
-            created.append({"rule": rule.get("name") or rule["event"], "task": tid})
+            tid = await create_task(render(rule["task"], f), repos, auto, post_to)
+            created.append({"rule": rule.get("name") or rule["event"], "task": tid, **({"auto": True} if auto else {})})
         except Exception as e:
             created.append({"rule": rule.get("name") or rule["event"], "error": str(e)})
         if rule.get("stop", True):
@@ -224,7 +227,7 @@ def tunnel_info():
 
 
 async def on_status(nc, msg, data):
-    await nc.publish(msg.reply, pack({"ok": True, "events": RECENT[-20:], "rules": [{k: r.get(k) for k in ("name", "event", "repo", "match", "branch")} for r in load_rules()],
+    await nc.publish(msg.reply, pack({"ok": True, "events": RECENT[-20:], "rules": [{k: r.get(k) for k in ("name", "event", "repo", "match", "branch", "auto")} for r in load_rules()],
                                       "tunnel": tunnel_info(), "secret": key_present("webhook"), "port": PORT}))
 
 

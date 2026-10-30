@@ -899,6 +899,31 @@ async def route(method, path, query, body, headers=None):
         if not secrets.compare_digest((headers or {}).get("x-torus-token", ""), STATE["token"]):
             return err(401, "Operator needs your TORUS token. Open the page from Termux with: torus open")
         return await api_op(method, path, body)
+    if path == "/api/hooks/rules":
+        if not secrets.compare_digest((headers or {}).get("x-torus-token", ""), STATE["token"]):
+            return err(401, "Webhook rules need your TORUS token. Open the page from Termux with: torus open")
+        rules_path = ETC / "hooks.yaml"
+        if method == "POST":
+            import yaml
+            text = str(body.get("yaml") or "")
+            if len(text) > 200_000:
+                return err(400, "rules file over 200 KB")
+            try:
+                data = yaml.safe_load(text) or {}
+            except yaml.YAMLError as e:
+                return err(400, f"not valid YAML: {str(e).splitlines()[0]}")
+            rules = data.get("rules") if isinstance(data, dict) else None
+            if not isinstance(rules, list):
+                return err(400, "the file needs a top-level `rules:` list")
+            for i, r in enumerate(rules):
+                if not isinstance(r, dict) or not r.get("event") or not r.get("task"):
+                    return err(400, f"rule {i + 1} needs `event` and `task`")
+            atomic_write(rules_path, text if text.endswith("\n") else text + "\n")
+        try:
+            text = rules_path.read_text(encoding="utf-8")
+        except OSError:
+            text = ""
+        return 200, {"yaml": text, "path": str(rules_path)}
     if path == "/api/hooks":
         if not secrets.compare_digest((headers or {}).get("x-torus-token", ""), STATE["token"]):
             return err(401, "Webhook status needs your TORUS token. Open the page from Termux with: torus open")
