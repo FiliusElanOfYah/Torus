@@ -1,0 +1,14 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# TORUS service cloudflared (phase 11): forwards ONE public hostname to hookd on 127.0.0.1:7778. Written by `torus install`.
+export HOME=/data/data/com.termux/files/home
+export PREFIX=/data/data/com.termux/files/usr
+export PATH=/data/data/com.termux/files/usr/bin:/data/data/com.termux/files/home/.torus/bin
+export TMPDIR=/data/data/com.termux/files/usr/tmp
+export TUNNEL_ORIGIN_CERT=/data/data/com.termux/files/home/.cloudflared/cert.pem
+exec 2>&1
+CFG=/data/data/com.termux/files/home/.torus/etc/tunnel.yml
+if [ ! -f "$CFG" ]; then
+  echo "cloudflared: no tunnel yet. Run: torus tunnel login  then  torus tunnel route hooks.example.com"
+  exec sleep 3600
+fi
+exec cloudflared tunnel --no-autoupdate --config "$CFG" run

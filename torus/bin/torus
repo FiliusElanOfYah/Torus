@@ -9,8 +9,8 @@ LIB="$TORUS_SRC/torus/lib/common.sh"
 # shellcheck source=../lib/common.sh
 . "$LIB"
 CTL="$TORUS_HOME/bin/torusctl.py"
-ALL_SERVICES="nats-server torus-mongo fetcherd parserd indexerd vaultd summarizerd airgapd sentineld llmd gatewayd coderd oracled operatord"
-PHASES="0 1 2 3 4 5 6 7 8 9 10"
+ALL_SERVICES="nats-server torus-mongo fetcherd parserd indexerd vaultd summarizerd airgapd sentineld llmd gatewayd coderd oracled operatord hookd cloudflared"
+PHASES="0 1 2 3 4 5 6 7 8 9 10 11"
 
 usage() {
 cat <<'EOF'
@@ -66,6 +66,10 @@ torus: your local research assistant
   torus gh scope task|all    task = Operator reaches only the repos named in each task (default); all = every repo the token sees
   torus upload <file...> --task <id> | --project <name> [--unpack]   hand files to a task (~/.torus/uploads/<id>) or a project
   torus console ["first message"]   chat-terminal with Claude: reads run at once, changes ask y/N inline (web: Console tab)
+
+ WEBHOOKS (phase 11: GitHub -> Operator tasks through a Cloudflare Tunnel; only hookd on 127.0.0.1:7778 is exposed)
+  torus hooks secret|status|register <owner/repo>|test     make the signing secret, see deliveries/rules, add the GitHub webhook
+  torus tunnel login | route <hostname> | status | off     one-time Cloudflare login, bind a hostname to hookd, check, stop
   torus llm on|off|status|test|models
   torus llm verify           check the 3 model ids (sonnet/opus/haiku) against Anthropic and fix stale ones
   torus llm model <tier>     default tier: sonnet (answers), opus (code), haiku (fast and cheap)
@@ -74,7 +78,7 @@ torus: your local research assistant
   torus search mode urls|brave|both  |  torus search count 1-10
 
  HARDENING AND BACKUP (phases 8 and 9)
-  torus audit                OPSEC audit: 16 checks, each FAIL says how to fix it
+  torus audit                OPSEC audit: 17 checks, each FAIL says how to fix it
   torus seal                 sign keys + daemons (ML-DSA-65); airgapd refuses keys that no longer match
   torus seal verify          check the seal and print the key fingerprint (compare with your paper copy)
   torus export [--with-keys] [--no-vault]   signed tarball of your whole setup in Downloads
@@ -224,7 +228,7 @@ cmd_key() {
   local action="${1:-status}" name="${2:-}" k
   case "$action" in
     set)
-      case "$name" in anthropic|brave|cloudflare|github) ;; *) die "usage: torus key set anthropic|brave|cloudflare|github" ;; esac
+      case "$name" in anthropic|brave|cloudflare|github|webhook) ;; *) die "usage: torus key set anthropic|brave|cloudflare|github|webhook" ;; esac
       mkdir -p "$TORUS_HOME/airgap"; chmod 700 "$TORUS_HOME/airgap"
       printf 'Paste your %s key (hidden), then press Enter: ' "$name"
       IFS= read -rs k; echo
@@ -240,7 +244,7 @@ cmd_key() {
       rm -f "$TORUS_HOME/airgap/$name.key" && ok "$name key removed"
       reseal ;;
     status)
-      for k in anthropic brave cloudflare github; do
+      for k in anthropic brave cloudflare github webhook; do
         f="$TORUS_HOME/airgap/$k.key"
         if [ -f "$f" ]; then
           m="$(stat -c %a "$f" 2>/dev/null)"
@@ -300,6 +304,49 @@ cmd_op() {
     strict) case "${2:-}" in on) ctl conf operator ask_every_change=true ;; off) ctl conf operator ask_every_change=false ;; *) ctl conf operator ;; esac ;;
     budget) [ -n "${2:-}" ] || die "usage: torus op budget <usd>"; ctl conf operator "default_budget_usd=$2" ;;
     *) ctl op create "$@" ;;
+  esac
+}
+
+cmd_hooks() {
+  case "${1:-status}" in
+    secret)
+      mkdir -p "$TORUS_HOME/airgap"; umask 077
+      k="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+      printf '%s\n' "$k" > "$TORUS_HOME/airgap/webhook.key" && chmod 600 "$TORUS_HOME/airgap/webhook.key"
+      ok "webhook secret stored (airgap/webhook.key, mode 600). GitHub needs the same value:"
+      echo "  $k"
+      echo "  paste it as the webhook Secret on github.com, or let TORUS do it:  torus hooks register owner/repo"
+      command -v torus_seal >/dev/null 2>&1 && torus seal >/dev/null 2>&1 || true ;;
+    status|register|test) ctl hooks "$@" ;;
+    *) die "usage: torus hooks secret|status|register <owner/repo>|test" ;;
+  esac
+}
+
+cmd_tunnel() {
+  command -v cloudflared >/dev/null 2>&1 || die "cloudflared is not installed: torus install 11"
+  cfg="$TORUS_HOME/etc/tunnel.yml"
+  case "${1:-status}" in
+    login) info "a Cloudflare login page opens (or a URL is printed): pick the zone that holds your hostname"; cloudflared tunnel login ;;
+    route)
+      host="${2:-}"; [ -n "$host" ] || die "usage: torus tunnel route hooks.example.com"
+      [ -f "$HOME/.cloudflared/cert.pem" ] || die "log in first: torus tunnel login"
+      cloudflared tunnel list 2>/dev/null | grep -q ' torus-hooks ' || cloudflared tunnel create torus-hooks
+      id="$(cloudflared tunnel list -o json 2>/dev/null | python3 -c 'import json,sys; print(next(t["id"] for t in json.load(sys.stdin) if t["name"]=="torus-hooks"))')"
+      [ -n "$id" ] || die "could not read the tunnel id (cloudflared tunnel list)"
+      cred="$(ls "$HOME"/.cloudflared/"$id".json 2>/dev/null | head -1)"; [ -f "$cred" ] || die "no credentials file for tunnel $id in ~/.cloudflared"
+      umask 077
+      printf 'tunnel: %s\ncredentials-file: %s\nno-autoupdate: true\ningress:\n  - hostname: %s\n    path: ^/hook/.*\n    service: http://127.0.0.1:7778\n  - service: http_status:404\n' "$id" "$cred" "$host" > "$cfg"
+      cloudflared tunnel route dns -f torus-hooks "$host" || warn "DNS route not added (already there?)"
+      sv restart cloudflared >/dev/null 2>&1 || true
+      ok "tunnel torus-hooks -> https://$host/hook/github -> 127.0.0.1:7778 (hookd only; the web page stays local)"
+      info "now:  torus hooks register owner/repo   (or add the webhook on github.com: URL https://$host/hook/github, content type json, secret from torus hooks secret)" ;;
+    status)
+      [ -f "$cfg" ] || { info "no tunnel configured (torus tunnel login; torus tunnel route <hostname>)"; exit 0; }
+      host="$(grep -m1 hostname "$cfg" | awk '{print $2}')"; sv status cloudflared hookd 2>/dev/null || true
+      if curl -fsS -m 15 "https://$host/hook/health" >/dev/null 2>&1; then ok "https://$host/hook/health answers"; else warn "https://$host/hook/health does not answer yet (DNS can take a minute; torus logs cloudflared)"; fi ;;
+    off) sv down cloudflared && ok "tunnel stopped (torus tunnel on to resume)" ;;
+    on) sv up cloudflared && ok "tunnel service up" ;;
+    *) die "usage: torus tunnel login | route <hostname> | status | on | off" ;;
   esac
 }
 
@@ -399,6 +446,8 @@ case "$cmd" in
   op) cmd_op "$@" ;;
   gh) cmd_gh "$@" ;;
   console) ctl console "$@" ;;
+  hooks) cmd_hooks "$@" ;;
+  tunnel) cmd_tunnel "$@" ;;
   upload) [ -n "${1:-}" ] || die "usage: torus upload <file...> --task <id> | --project <name> [--unpack]"; ctl upload "$@" ;;
   search) cmd_search "$@" ;;
   oracle) cmd_oracle "$@" ;;

@@ -40,3 +40,5 @@
 10 own  0644 bin/torus_github.py     H:bin/torus_github.py
 10 own  0755 bin/torus_askpass.py    H:bin/torus_askpass.py
 10 keep 0644 etc/operator.conf       H:etc/operator.conf
+11 own  0755 bin/hookd.py            H:bin/hookd.py
+11 keep 0644 etc/hooks.yaml          H:etc/hooks.yaml

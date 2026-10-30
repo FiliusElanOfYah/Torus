@@ -6,7 +6,7 @@ T="${TORUS_HOME:-/tmp/torus-test}"
 PY="${TORUS_PY:-/tmp/tv/bin/python}"
 SRC="$(cd "$(dirname "$0")/.." && pwd)/files"
 export TORUS_HOME="$T"
-DAEMONS="fetcherd parserd indexerd vaultd summarizerd airgapd sentineld llmd gatewayd coderd oracled operatord"
+DAEMONS="fetcherd parserd indexerd vaultd summarizerd airgapd sentineld llmd gatewayd coderd oracled operatord hookd"
 case "${1:-start}" in
   start)
     mkdir -p "$T"/{bin,etc,logs,var,web,vault/inbox,vault/answers,vault/topics,airgap}

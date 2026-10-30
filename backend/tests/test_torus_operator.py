@@ -274,7 +274,7 @@ def test_cli_and_install_wiring(tmp_path):
     r = torus("install", "11", home=tmp_path)
     assert "unknown phase" in (r.stdout + r.stderr)
     src = (ROOT / "torus" / "bin" / "torus").read_text()
-    assert 'PHASES="0 1 2 3 4 5 6 7 8 9 10"' in src and "operatord" in src
+    assert 'PHASES="0 1 2 3 4 5 6 7 8 9 10 11"' in src and "operatord" in src
     assert "10 operatord" in (ROOT / "torus" / "services.txt").read_text()
     man = (ROOT / "torus" / "manifest.txt").read_text()
     assert "bin/operatord.py" in man and "etc/operator.conf" in man

@@ -268,6 +268,29 @@ def check_operator():
     return "pass", f"Operator: keys/seal/gateway.token unreadable to the agent; snapshots mode 700; {how}", ""
 
 
+def check_hooks():
+    if not (HOME / "bin" / "hookd.py").exists():
+        return "skip", "phase 11 (webhooks) not installed", "torus install 11"
+    tun = ETC / "tunnel.yml"
+    if not tun.exists():
+        return "pass", "hookd listens on 127.0.0.1 only; no tunnel configured, nothing reachable from outside", ""
+    try:
+        import yaml
+        cfg = yaml.safe_load(tun.read_text(encoding="utf-8")) or {}
+    except Exception as e:
+        return "fail", f"tunnel.yml unreadable: {e}", "torus tunnel route <hostname>"
+    bad = [f"{i.get('hostname')} -> {i.get('service')}" for i in cfg.get("ingress") or [] if i.get("hostname") and i.get("service") != "http://127.0.0.1:7778"]
+    if bad:
+        return "fail", "the tunnel forwards to something other than hookd: " + ", ".join(bad), "torus tunnel route <hostname>   (rewrites tunnel.yml to hookd only)"
+    if not (AIRGAP / "webhook.key").exists():
+        return "fail", "tunnel is up but no webhook secret: every delivery is refused with 503", "torus hooks secret"
+    if mode(AIRGAP / "webhook.key") & 0o077:
+        return "fail", f"webhook.key mode {mode(AIRGAP / 'webhook.key'):o}", f"chmod 600 {AIRGAP / 'webhook.key'}"
+    if mode(tun) & 0o077:
+        return "warn", f"tunnel.yml mode {mode(tun):o} (holds the tunnel credentials path)", f"chmod 600 {tun}"
+    return "pass", "tunnel -> hookd (127.0.0.1:7778) only; HMAC secret stored, mode 600", ""
+
+
 def check_github():
     key = AIRGAP / "github.key"
     if not key.exists():
@@ -305,6 +328,7 @@ CHECKS = [
     ("extra-4", "Claude traffic path (Cloudflare AI Gateway on/off)", check_cf_gateway),
     ("extra-5", "Operator reach and approval mode", check_operator),
     ("extra-6", "GitHub token and Operator repo scope", check_github),
+    ("extra-7", "Webhooks: tunnel exposes only hookd", check_hooks),
 ]
 
 

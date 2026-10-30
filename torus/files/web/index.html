@@ -569,6 +569,8 @@ async function viewSettings() {
     <label>Operator: GitHub scope</label>
     <div class="seg" data-testid="settings-gh-scope-toggle"><button data-ghscope="task" class="${s.github_scope!=="all"?"on":""}" data-testid="settings-gh-scope-task">Repos named per task</button><button data-ghscope="all" class="${s.github_scope==="all"?"on":""}" data-testid="settings-gh-scope-all">Every repo the token sees</button></div>
     <p class="hint" data-testid="settings-gh-state">GitHub token: <b class="${s.keys.github?"s-ok":"hint"}">${s.keys.github?"stored":"not set"}</b> — <code class="k">torus key set github</code> (fine-grained PAT: Contents, Metadata, Issues, Pull requests: read). Reads (tree, files, search, commits, issues, PR diffs) run alone; a clone counts as a change. Same as <code class="k">torus gh scope task|all</code>.</p></div>
+  <div class="card"><label style="margin-top:0">Webhooks (GitHub → Operator tasks)</label><div id="hooks-body" data-testid="hooks-body"><p class="hint">loading…</p></div>
+    <p class="hint">GitHub events reach the phone through a Cloudflare Tunnel that forwards one hostname to <code class="k">hookd</code> only (127.0.0.1:7778); the web page stays local. Rules live in <code class="k">~/.torus/etc/hooks.yaml</code>. Every task a webhook creates still waits for your plan-approval tap. Setup: <code class="k">torus install 11 · torus hooks secret · torus tunnel login · torus tunnel route hooks.example.com · torus hooks register owner/repo</code>.</p></div>
   <div class="card" data-testid="settings-gateway"><label style="margin-top:0">Claude traffic path</label>
     <div class="seg" data-testid="settings-gateway-toggle"><button data-cf="0" class="${s.cf_enabled?"":"on"}" data-testid="settings-gateway-direct">Direct to Anthropic</button><button data-cf="1" class="${s.cf_enabled?"on":""}" data-testid="settings-gateway-cloudflare">Via Cloudflare gateway</button></div>
     <p class="hint" data-testid="settings-gateway-state">${s.cf_enabled
@@ -592,7 +594,7 @@ async function viewSettings() {
     <div class="row"><button id="export-run" data-testid="export-run">Export setup</button>
       <label class="hint" style="margin:0;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="export-keys" data-testid="export-with-keys" style="width:22px;height:22px;accent-color:var(--amber)"> include API keys</label></div>
     <p class="hint">Writes a signed <code class="k">torus-&lt;date&gt;.tar.gz</code> to Downloads. Restore on another phone with <code class="k">torus restore &lt;file&gt;</code>.</p></div>`;
-  renderAudit(); renderExports(); renderModels(); renderSpend();
+  renderAudit(); renderExports(); renderModels(); renderSpend(); renderHooks();
   $("#cap-save").onclick = async () => {
     $("#cap-save").disabled = true;
     try { settings = await api("/api/settings", {daily_cap_usd: $("#cap-usd").value || 0}); toast(settings.daily_cap_usd ? `Cap ${fmtUsd(settings.daily_cap_usd)}/day` : "Cap removed"); await renderSpend(); }
@@ -891,6 +893,14 @@ async function renderAudit(run) {
   el.innerHTML = `<p class="hint" data-testid="audit-summary"><b class="${c.fail?"s-error":"s-ok"}">${c.fail ? c.fail + " failing" : "no failures"}</b> · ${c.pass} pass · ${c.warn} warn · ${c.skip} skipped · ${esc(a.when)}</p>` +
     a.items.map(i => `<details class="svc" style="display:block" data-testid="audit-item-${i.id}"><summary style="display:flex;justify-content:space-between;cursor:pointer;list-style:none"><span>${esc(i.label)}</span><span class="${auditCls[i.status]}" style="white-space:nowrap;margin-left:12px">${auditIcon[i.status]} ${i.status}</span></summary>
       <p class="hint" style="margin:6px 0 0">${esc(i.detail)}${i.fix && i.status !== "pass" ? `<br>fix: <code class="k">${esc(i.fix)}</code>` : ""}</p></details>`).join("");
+}
+async function renderHooks() {
+  const el = $("#hooks-body"); if (!el) return;
+  try {
+    const h = await api("/api/hooks"); const tun = h.tunnel || {};
+    el.innerHTML = `<p class="hint" data-testid="hooks-summary">secret <b class="${h.secret?"s-ok":"s-error"}">${h.secret?"stored":"missing"}</b> · tunnel ${tun.hostname ? `<b class="${tun.ok?"s-ok":"s-error"}">https://${esc(tun.hostname)}</b>${tun.ok ? "" : " — " + esc(tun.why)}` : "<b>not configured</b>"} · ${h.rules.length} rule(s)</p>` +
+      (h.events.length ? h.events.slice(-8).reverse().map(e => `<div class="svc" data-testid="hooks-event"><span>${esc(when(e.t))} ${esc(e.event || "")} ${esc(e.action || "")} <span class="hint">${esc(e.repo || "")}</span></span><span class="${e.ok?"s-ok":"s-error"}">${e.ok ? ((e.created||[]).map(c => c.task ? "task " + esc(c.task) : "error").join(", ") || "ok") : esc(e.why || "refused")}</span></div>`).join("") : `<p class="hint" data-testid="hooks-empty">No deliveries yet.</p>`);
+  } catch (err) { el.innerHTML = `<p class="hint" data-testid="hooks-missing">${esc(err.message)}</p>`; }
 }
 async function renderExports() {
   const el = $("#export-body"); if (!el) return;

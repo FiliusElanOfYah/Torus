@@ -236,7 +236,7 @@ torus install 8
   whose file no longer matches the seal. `torus seal verify` prints the key
   fingerprint; write it on paper and compare now and then. `torus install` and
   `torus key set` re-seal by themselves.
-- **Audit**: `torus audit` runs 16 checks (F-Droid build, no port on 0.0.0.0,
+- **Audit**: `torus audit` runs 17 checks (F-Droid build, no port on 0.0.0.0,
   key file modes, no key in logs, seal, log rotation, storage scope, Termux:Boot,
   package list, Claude off at boot, gateway token, Host-header guard, CRLF,
   Claude traffic path, Operator reach). Every FAIL names the fix. The same list is on the web page under **Settings**.
@@ -370,6 +370,50 @@ Operator default budget; **Clear** resets it). **Undo edits** restores files the
 deleted; **Make it a task** hands the request plus the recent console context to the Operator as
 a planned task. Claude keeps the last ~24 turns.
 
+### Webhooks: GitHub → Operator tasks (`torus install 11`)
+
+Let GitHub wake the Operator: a comment with `@torus`, a failed workflow on `main`, whatever
+rules you write. Delivery path: GitHub → **Cloudflare Tunnel** (free plan) → one hostname →
+`hookd` on `127.0.0.1:7778`. The web page (7777) is never exposed; `torus audit` (`extra-7`)
+fails if `tunnel.yml` ever points anywhere but hookd.
+
+```bash
+torus install 11                       # pkg install cloudflared, hookd + cloudflared services
+torus hooks secret                     # 32-byte signing secret -> airgap/webhook.key (printed once)
+torus tunnel login                     # one-time Cloudflare login (the zone must be on Cloudflare DNS)
+torus tunnel route hooks.guardiaios.app   # creates tunnel "torus-hooks", DNS record, etc/tunnel.yml
+torus hooks register owner/repo        # adds the webhook on GitHub with the secret, via your PAT
+torus hooks status | torus hooks test | torus tunnel status | torus tunnel off
+```
+
+hookd checks `X-Hub-Signature-256` (HMAC with the secret), refuses replays (`X-GitHub-Delivery`),
+caps bodies at 1 MB, and matches **rules** in `~/.torus/etc/hooks.yaml` (kept across updates):
+
+```yaml
+rules:
+  - name: "@torus in an issue or PR comment"
+    event: issue_comment
+    action: created
+    repo: "*"            # or owner/repo
+    match: "@torus"      # substring of the comment/issue text
+    task: "GitHub {repo} #{number} ({title}) — {sender} wrote:\n\n{body}\n\nDo what the comment asks. {html_url}"
+  - name: "workflow failed on main"
+    event: workflow_run
+    conclusion: failure
+    branch: main
+    task: "The workflow '{workflow}' failed on {branch} in {repo}. Find the cause. {html_url}"
+```
+
+Events: `push pull_request issues issue_comment workflow_run check_run release`. Each match
+creates an Operator task (repos = the event's repo unless the rule lists `repos`). **Every webhook
+task still waits for your plan-approval tap** — nothing runs because a stranger commented.
+Settings → *Webhooks* shows the secret/tunnel state and the last deliveries.
+
+**Honest limits.** The phone must be online and Termux awake (wake-lock, battery optimisation
+off — Step 7). Deliveries that arrive while it is offline are not retried by GitHub automatically
+(use *Redeliver* on the webhook page). Cloudflare Tunnel is free; it does add a public hostname
+on your account, protected only by the HMAC secret — keep `torus hooks secret` private.
+
 ### Handing files to a task (uploads)
 
 On the Operator tab press **＋ Add files** before you press Plan: each file goes up in 8 MB
@@ -421,4 +465,5 @@ from editors are stripped automatically. `torus files` shows what differs.
 | 7 | coder: write, run and fix code in your projects; oracled: refills pinned topics on a schedule (`torus oracle`) | coderd, oracled |
 | 8 | hardening: ML-DSA-65 seal, `torus audit`, Claude off at boot, log pruning | none |
 | 9 | backup: `torus export` / `torus restore` (signed tarball) | none |
-| 10 | Operator: Claude plans, you approve, it reads/edits/runs/installs inside Termux with undo per phase; Termux:API phone tools; GitHub read (`torus op`, `torus gh`) | operatord |
+| 10 | Operator: Claude plans, you approve, it reads/edits/runs/installs inside Termux with undo per phase; Termux:API phone tools; GitHub read + write; uploads; Console (`torus op`, `torus gh`, `torus console`) | operatord |
+| 11 | Webhooks: GitHub events → Operator tasks through a Cloudflare Tunnel that exposes hookd only (`torus hooks`, `torus tunnel`) | hookd, cloudflared |

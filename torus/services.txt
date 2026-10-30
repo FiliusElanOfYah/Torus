@@ -15,3 +15,5 @@
 7 coderd       python.run  own
 7 oracled      python.run  own
 10 operatord    python.run  own
+11 hookd        python.run  own
+11 cloudflared  cloudflared.run own

@@ -332,7 +332,7 @@ def test_gateway_settings_cli_audit_manifest():
     assert '"github": key_present("github")' in gw
     assert '"github"' in (BIN / "airgapd.py").read_text()
     torus = (ROOT / "torus" / "bin" / "torus").read_text()
-    assert "anthropic|brave|cloudflare|github)" in torus and "gh) cmd_gh" in torus and "github_scope=$2" in torus
+    assert "anthropic|brave|cloudflare|github|webhook)" in torus and "gh) cmd_gh" in torus and "github_scope=$2" in torus
     assert 'ctl op create "$@"' in torus
     ctl = (BIN / "torusctl.py").read_text()
     assert 'add_parser("gh")' in ctl and '"--repos"' in ctl

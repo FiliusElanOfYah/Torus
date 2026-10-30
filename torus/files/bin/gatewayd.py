@@ -899,6 +899,14 @@ async def route(method, path, query, body, headers=None):
         if not secrets.compare_digest((headers or {}).get("x-torus-token", ""), STATE["token"]):
             return err(401, "Operator needs your TORUS token. Open the page from Termux with: torus open")
         return await api_op(method, path, body)
+    if path == "/api/hooks":
+        if not secrets.compare_digest((headers or {}).get("x-torus-token", ""), STATE["token"]):
+            return err(401, "Webhook status needs your TORUS token. Open the page from Termux with: torus open")
+        try:
+            res = await nreq("torus.hooks.status", {}, 10)
+        except Exception as e:
+            return err(503, f"hookd is not running ({e.__class__.__name__}): torus install 11")
+        return 200, res
     if path.startswith("/api/upload"):
         if not secrets.compare_digest((headers or {}).get("x-torus-token", ""), STATE["token"]):
             return err(401, "Uploads need your TORUS token. Open the page from Termux with: torus open")

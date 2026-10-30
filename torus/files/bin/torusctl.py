@@ -441,6 +441,71 @@ def cmd_console(a):
         text = ""
 
 
+def cmd_hooks(a):
+    """torus hooks status | register <owner/repo> | test  (phase 11)."""
+    args = list(a.args)
+    sub = args[0] if args else "status"
+    if sub == "status":
+        s = http("GET", "/api/hooks")
+        tun = s["tunnel"]
+        print(f"secret: {'stored' if s['secret'] else 'missing (torus hooks secret)'}   hookd: 127.0.0.1:{s['port']}   "
+              f"tunnel: {('https://' + tun['hostname']) if tun.get('hostname') else 'not configured (torus tunnel route <host>)'}"
+              + ("" if tun["ok"] else f"   PROBLEM: {tun['why']}"))
+        print(f"rules ({len(s['rules'])}):")
+        for r in s["rules"]:
+            print(f"  - {r.get('name') or r['event']}: event={r['event']} repo={r.get('repo') or '*'}" + (f" match={r['match']!r}" if r.get("match") else "") + (f" branch={r['branch']}" if r.get("branch") else ""))
+        print("recent deliveries:" if s["events"] else "no deliveries yet")
+        for e in s["events"][-10:]:
+            when = time.strftime("%m-%d %H:%M", time.localtime(e["t"]))
+            made = ", ".join(c.get("task") or f"error: {c.get('error')}" for c in e.get("created") or [])
+            print(f"  {when} {e.get('event')} {e.get('action') or ''} {e.get('repo') or ''} {'ok' if e.get('ok') else 'REFUSED: ' + str(e.get('why'))}" + (f" -> task {made}" if made else ""))
+        return
+    if sub == "test":
+        import urllib.request
+        s = http("GET", "/api/hooks")
+        try:
+            with urllib.request.urlopen(f"http://127.0.0.1:{s['port']}/hook/health", timeout=5) as r:
+                print("hookd local:", r.read().decode())
+        except OSError as e:
+            sys.exit(f"hookd is not answering locally: {e}  (torus status / torus logs hookd)")
+        host = s["tunnel"].get("hostname")
+        if host:
+            try:
+                with urllib.request.urlopen(f"https://{host}/hook/health", timeout=20) as r:
+                    print(f"https://{host}/hook/health:", r.read().decode())
+            except OSError as e:
+                sys.exit(f"the tunnel does not answer yet: {e}  (torus tunnel status)")
+        return
+    if sub == "register":
+        if len(args) < 2:
+            sys.exit("usage: torus hooks register <owner/repo>")
+        import torus_github as gh
+        s = http("GET", "/api/hooks")
+        host = s["tunnel"].get("hostname")
+        if not host:
+            sys.exit("set the tunnel up first: torus tunnel login; torus tunnel route <hostname>")
+        if not s["secret"]:
+            sys.exit("make the secret first: torus hooks secret")
+        events = sorted({r["event"] for r in s["rules"]} | {"ping"}) if s["rules"] else ["issue_comment", "workflow_run", "push", "pull_request", "issues"]
+
+        async def go():
+            import httpx
+            from torus_common import get_secret
+            token, secret = await get_secret("github"), await get_secret("webhook")
+            async with httpx.AsyncClient(timeout=60) as client:
+                r = await gh.call(client, token, "POST", f"/repos/{args[1]}/hooks",
+                                  json_body={"name": "web", "active": True, "events": [e for e in events if e != "ping"],
+                                             "config": {"url": f"https://{host}/hook/github", "content_type": "json", "secret": secret, "insecure_ssl": "0"}})
+                return r.json()
+        try:
+            d = asyncio.run(go())
+        except (gh.GitHubError, RuntimeError) as e:
+            sys.exit(str(e))
+        print(f"webhook #{d.get('id')} added on {args[1]} -> https://{host}/hook/github for {', '.join(d.get('events') or [])}. GitHub sends a ping now: torus hooks status")
+        return
+    sys.exit("usage: torus hooks status | register <owner/repo> | test")
+
+
 def cmd_verify(a):
     r = http("POST", "/api/llm/verify", {"fix": not a.check_only})
     for t, info in r["tiers"].items():
@@ -551,6 +616,9 @@ def main():
     s = sub.add_parser("gh")
     s.add_argument("args", nargs="*")
     s.set_defaults(fn=cmd_gh)
+    s = sub.add_parser("hooks")
+    s.add_argument("args", nargs="*")
+    s.set_defaults(fn=cmd_hooks)
     s = sub.add_parser("console")
     s.add_argument("args", nargs="*")
     s.set_defaults(fn=cmd_console)

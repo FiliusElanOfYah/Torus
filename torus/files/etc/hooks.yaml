@@ -1,0 +1,22 @@
+# TORUS webhook rules (phase 11). hookd re-reads this file on every delivery; edit here or in Settings → Webhooks.
+# A rule needs `event` and `task`. Every task it creates still waits for your plan-approval tap.
+#
+# fields you can filter on:  event, action, repo ("*" = any), branch, conclusion, sender, match (substring of the
+#                            comment/issue text), label
+# placeholders for `task`:   {repo} {number} {title} {body} {branch} {html_url} {sender} {workflow} {conclusion} {action}
+# `repos`: the GitHub repos the task may reach (default: the repo the event came from). `stop: false` lets later rules match too.
+rules:
+  - name: "@torus in an issue or PR comment"
+    event: issue_comment
+    action: created
+    repo: "*"
+    match: "@torus"
+    task: "GitHub {repo} #{number} ({title}) — {sender} wrote:\n\n{body}\n\nDo what the comment asks. Reply on the thread with the github comment op when done. {html_url}"
+
+  - name: "workflow failed on main"
+    event: workflow_run
+    action: completed
+    conclusion: failure
+    branch: main
+    repo: "*"
+    task: "The workflow '{workflow}' failed on {branch} in {repo}. Read the logs you can reach (commits, the PR diff if any), find the likely cause and propose a fix on a branch. {html_url}"
