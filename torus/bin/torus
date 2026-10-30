@@ -53,8 +53,15 @@ torus: your local research assistant
   torus oracle every <min>   refill interval (5-1440)             torus oracle on|off   pause the schedule
 
  KEYS AND SWITCHES
-  torus key set anthropic|brave    store a key (typed hidden, file mode 600)
+  torus key set anthropic|brave|cloudflare|github    store a key (typed hidden, file mode 600)
   torus key status | torus key rm <name>
+
+ OPERATOR (phase 10: Claude works inside Termux, you approve)
+  torus op "task" [--repos owner/a,owner/b]   plan -> approve -> follow; repos the task may read on GitHub
+  torus op list|show|follow|approve|yes|no|stop|resume <id> | undo <id> <phase> | strict on|off | budget <usd>
+  torus gh repos | tree <owner/repo> [path] [ref] | read <owner/repo> <path> [ref] | search <owner/repo> "<words>"
+  torus gh commits|issues|prs <owner/repo> [n] | pr_diff <owner/repo> <n> | clone <owner/repo> [dest] [ref]
+  torus gh scope task|all    task = Operator reaches only the repos named in each task (default); all = every repo the token sees
   torus llm on|off|status|test|models
   torus llm verify           check the 3 model ids (sonnet/opus/haiku) against Anthropic and fix stale ones
   torus llm model <tier>     default tier: sonnet (answers), opus (code), haiku (fast and cheap)
@@ -63,7 +70,7 @@ torus: your local research assistant
   torus search mode urls|brave|both  |  torus search count 1-10
 
  HARDENING AND BACKUP (phases 8 and 9)
-  torus audit                OPSEC audit: 13 checks, each FAIL says how to fix it
+  torus audit                OPSEC audit: 16 checks, each FAIL says how to fix it
   torus seal                 sign keys + daemons (ML-DSA-65); airgapd refuses keys that no longer match
   torus seal verify          check the seal and print the key fingerprint (compare with your paper copy)
   torus export [--with-keys] [--no-vault]   signed tarball of your whole setup in Downloads
@@ -213,13 +220,14 @@ cmd_key() {
   local action="${1:-status}" name="${2:-}" k
   case "$action" in
     set)
-      case "$name" in anthropic|brave|cloudflare) ;; *) die "usage: torus key set anthropic|brave|cloudflare" ;; esac
+      case "$name" in anthropic|brave|cloudflare|github) ;; *) die "usage: torus key set anthropic|brave|cloudflare|github" ;; esac
       mkdir -p "$TORUS_HOME/airgap"; chmod 700 "$TORUS_HOME/airgap"
       printf 'Paste your %s key (hidden), then press Enter: ' "$name"
       IFS= read -rs k; echo
       k="$(printf '%s' "$k" | tr -d '[:space:]')"
       [ -n "$k" ] || die "nothing pasted"
       [ "$name" = anthropic ] && case "$k" in sk-ant-*) ;; *) warn "Anthropic keys normally start with sk-ant-" ;; esac
+      [ "$name" = github ] && case "$k" in github_pat_*|ghp_*) ;; *) warn "GitHub tokens normally start with github_pat_ (fine-grained) or ghp_" ;; esac
       ( umask 077; printf '%s\n' "$k" > "$TORUS_HOME/airgap/$name.key" )
       chmod 600 "$TORUS_HOME/airgap/$name.key"; unset k
       ok "$name key stored in ~/.torus/airgap/$name.key (mode 600, only airgapd reads it)"
@@ -228,14 +236,14 @@ cmd_key() {
       rm -f "$TORUS_HOME/airgap/$name.key" && ok "$name key removed"
       reseal ;;
     status)
-      for k in anthropic brave cloudflare; do
+      for k in anthropic brave cloudflare github; do
         f="$TORUS_HOME/airgap/$k.key"
         if [ -f "$f" ]; then
           m="$(stat -c %a "$f" 2>/dev/null)"
           [ "$m" = 600 ] && ok "$k key stored (600)" || warn "$k key has mode $m. Fix with: chmod 600 $f"
         else info "$k key not set (torus key set $k)"; fi
       done ;;
-    *) die "usage: torus key set|rm|status <anthropic|brave|cloudflare>" ;;
+    *) die "usage: torus key set|rm|status <anthropic|brave|cloudflare|github>" ;;
   esac
 }
 
@@ -287,7 +295,17 @@ cmd_op() {
     list|show|approve|yes|no|stop|resume|undo|follow) ctl op "$@" ;;
     strict) case "${2:-}" in on) ctl conf operator ask_every_change=true ;; off) ctl conf operator ask_every_change=false ;; *) ctl conf operator ;; esac ;;
     budget) [ -n "${2:-}" ] || die "usage: torus op budget <usd>"; ctl conf operator "default_budget_usd=$2" ;;
-    *) ctl op create "$*" ;;
+    *) ctl op create "$@" ;;
+  esac
+}
+
+cmd_gh() {
+  # torus gh repos|tree|read|search|commits|issues|prs|pr_diff|clone ...   GitHub through the stored token (phase 10)
+  case "${1:-}" in
+    '') die 'usage: torus gh repos | tree <owner/repo> [path] [ref] | read <owner/repo> <path> [ref] | search <owner/repo> "<words>" | commits|issues|prs <owner/repo> [n] | pr_diff <owner/repo> <n> | clone <owner/repo> [dest] [ref] | scope task|all' ;;
+    scope) case "${2:-}" in task|all) ctl conf operator "github_scope=$2" ;; *) ctl conf operator | grep -E '^github_scope=' || echo "github_scope=task" ;; esac ;;
+    *) [ -f "$TORUS_HOME/airgap/github.key" ] || die "no GitHub token yet: torus key set github   (github.com -> Settings -> Developer settings -> Fine-grained tokens; Contents: read, Metadata: read, Pull requests: read, Issues: read)"
+       ctl gh "$@" ;;
   esac
 }
 
@@ -375,6 +393,7 @@ case "$cmd" in
   key) cmd_key "$@" ;;
   llm) cmd_llm "$@" ;;
   op) cmd_op "$@" ;;
+  gh) cmd_gh "$@" ;;
   search) cmd_search "$@" ;;
   oracle) cmd_oracle "$@" ;;
   audit) cmd_audit "$@" ;;

@@ -479,11 +479,13 @@ def settings_payload():
                           "status": (last.get("tiers", {}).get(t) or {}).get("status", "unchecked")} for t in torus_models.TIERS},
             "models_checked": last.get("when", 0), "models_problems": last.get("problems", 0),
             "search_mode": srch["mode"], "search_count": srch["count"],
-            "keys": {"anthropic": key_present("anthropic"), "brave": key_present("brave"), "cloudflare": key_present("cloudflare")},
+            "keys": {"anthropic": key_present("anthropic"), "brave": key_present("brave"), "cloudflare": key_present("cloudflare"),
+                     "github": key_present("github")},
             "cf_account": llm["cf_account"], "cf_gateway": llm["cf_gateway"], "cf_enabled": bool(llm["cf_account"] and llm["cf_gateway"]),
             "cf_saved_account": c.get("cf_saved_account", ""), "cf_saved_gateway": c.get("cf_saved_gateway", ""),
             "daily_cap_usd": torus_spend.daily_cap(),
-            "op_ask_every_change": truthy(read_conf(ETC / "operator.conf").get("ask_every_change", "false"))}
+            "op_ask_every_change": truthy(read_conf(ETC / "operator.conf").get("ask_every_change", "false")),
+            "github_scope": "all" if (read_conf(ETC / "operator.conf").get("github_scope") or "task").strip().lower() == "all" else "task"}
 
 
 CF_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -538,6 +540,10 @@ async def api_settings(body):
         if not isinstance(body["op_ask_every_change"], bool):
             return err(400, "op_ask_every_change must be true or false")
         write_conf(ETC / "operator.conf", {"ask_every_change": "true" if body["op_ask_every_change"] else "false"})
+    if "github_scope" in body:
+        if body["github_scope"] not in ("task", "all"):
+            return err(400, "github_scope must be task or all")
+        write_conf(ETC / "operator.conf", {"github_scope": body["github_scope"]})
     if cf is not None:
         write_conf(LLM_TOGGLE, cf)
     if "model" in body:

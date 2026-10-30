@@ -24,7 +24,7 @@ except ImportError:  # phase 8 not installed yet: unsealed mode
     GUARD = None
 
 NAME = "airgapd"
-ALLOWED = {"anthropic", "brave", "cloudflare"}
+ALLOWED = {"anthropic", "brave", "cloudflare", "github"}
 
 
 async def handle(reader, writer):

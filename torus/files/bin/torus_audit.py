@@ -268,6 +268,19 @@ def check_operator():
     return "pass", f"Operator: keys/seal/gateway.token unreadable to the agent; snapshots mode 700; {how}", ""
 
 
+def check_github():
+    key = AIRGAP / "github.key"
+    if not key.exists():
+        return "skip", "no GitHub token stored (Operator cannot reach GitHub)", "torus key set github   (fine-grained PAT)"
+    if mode(key) & 0o077:
+        return "fail", f"github.key mode {mode(key):o}", f"chmod 600 {key}"
+    sc = (read_conf(ETC / "operator.conf").get("github_scope") or "task").strip().lower()
+    if sc == "all":
+        return ("warn", "GitHub scope is ALL: the Operator may read any repo the token can see",
+                "torus gh scope task   (then name repos per task), and keep the PAT fine-grained with only the repos you need")
+    return "pass", "GitHub token mode 600; Operator reaches only the repos named in each task", ""
+
+
 def check_crlf():
     bad = [p.name for p in (HOME / "bin").glob("*.py") if b"\r" in p.read_bytes()]
     if bad:
@@ -291,6 +304,7 @@ CHECKS = [
     ("extra-3", "No CRLF line endings in daemons", check_crlf),
     ("extra-4", "Claude traffic path (Cloudflare AI Gateway on/off)", check_cf_gateway),
     ("extra-5", "Operator reach and approval mode", check_operator),
+    ("extra-6", "GitHub token and Operator repo scope", check_github),
 ]
 
 

@@ -27,7 +27,8 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from torus_common import (AIRGAP, ETC, VAR, VAULT, atomic_write, key_present,  # noqa: E402
+import torus_github as gh  # noqa: E402
+from torus_common import (AIRGAP, ETC, VAR, VAULT, atomic_write, get_secret, key_present,  # noqa: E402
                           llm_settings, log, pack, read_conf, run_daemon, slugify, truthy)
 
 NAME = "operatord"
@@ -98,7 +99,9 @@ PLAN_SYSTEM = (
     '"runs":["commands you will run, with their program names"],"phone":["termux-api features: clipboard_get clipboard_set notify '
     'battery wifi device open camera record sms_send sms_list location contacts"]}}],"estimate_usd":0.25,"notes":"risks, questions"}}\n'
     "2-6 phases. Be concrete: name files and commands. Estimate the Claude cost from the reads you need. You cannot touch "
-    "~/.torus/airgap, the seal or gateway.token; say so in notes if the task needs them.")
+    "~/.torus/airgap, the seal or gateway.token; say so in notes if the task needs them.{github}")
+GITHUB_PLAN = ("\nGitHub: a github tool is available (repos, tree, read, search, commits, issues, prs, pr_diff, clone) for {repos}; "
+               "name the repos and files you will read in `reads` and any clone in `changes`.")
 WORK_SYSTEM = (
     "You are TORUS Operator executing phase {n} of {total} ({title}) of an approved plan inside Termux on the user's Android "
     "phone (aarch64, bash, Python 3, no root, no sudo; pkg install / pip install; home {home}; shared storage {shared}; "
@@ -106,12 +109,14 @@ WORK_SYSTEM = (
     '{{"say":"one line on what you are doing","actions":[ ...up to 5 of: '
     '{{"tool":"read","path":"file"}} | {{"tool":"list","path":"folder"}} | {{"tool":"shell","cmd":"command","timeout":120}} | '
     '{{"tool":"write","path":"file","content":"ENTIRE file"}} | {{"tool":"delete","path":"file"}} | '
-    '{{"tool":"phone","feature":"clipboard_get|clipboard_set|notify|battery|wifi|device|open|camera|record|sms_send|sms_list|location|contacts","args":{{}}}} ]}}\n'
+    '{{"tool":"phone","feature":"clipboard_get|clipboard_set|notify|battery|wifi|device|open|camera|record|sms_send|sms_list|location|contacts","args":{{}}}}{github} ]}}\n'
     'or, when this phase is complete: {{"phase_done":true,"summary":"what changed and what you found, 3-10 lines"}}\n'
     "Rules: edit files with the write tool (whole file; it is snapshotted so the user can undo), use shell for running and "
     "installing. Stay inside this phase and the plan; anything else waits for the user's tap. Never try to read keys. "
     "Outputs are trimmed to {max_out} characters; ask for smaller slices (head/tail/grep) instead of whole big files. "
     "If an action is denied, continue without it or finish the phase explaining what is missing.")
+GITHUB_WORK = (' | {{"tool":"github","op":"repos|tree|read|search|commits|issues|prs|pr_diff|clone","repo":"owner/name",'
+               '"path":"","ref":"","q":"","n":10,"state":"open","dest":"folder for clone"}}  (GitHub, repos: {repos})')
 
 
 # ---------------------------------------------------------------- settings / state
@@ -127,7 +132,17 @@ def op_settings():
         steps = 40
     cwd = Path(os.path.expanduser(c.get("cwd") or str(TERMUX_HOME)))
     return {"ask_every_change": truthy(c.get("ask_every_change", "false")), "default_budget_usd": budget,
-            "model": c.get("model") or "sonnet", "max_steps": steps, "cwd": str(cwd)}
+            "model": c.get("model") or "sonnet", "max_steps": steps, "cwd": str(cwd), "github_scope": gh.scope(),
+            "github_key": key_present("github")}
+
+
+def github_repos_text(t):
+    """What Claude may reach on GitHub for this task ('' when GitHub is not available to it)."""
+    if not t.get("github_key"):
+        return ""
+    if t.get("github_scope") == "all":
+        return "any repo the token can see" + (f" (the user named: {', '.join(t['repos'])})" if t.get("repos") else "")
+    return ", ".join(t.get("repos") or []) or ""
 
 
 def save(t):
@@ -245,6 +260,31 @@ def classify(action, plan_words, strict):
         if level == "change" and strict:
             level = "danger"
         return level, PHONE_WHY.get(feat, f"uses the phone's {feat.replace('_', ' ')}")
+    if tool == "github":
+        op = str(action.get("op") or "")
+        if op not in gh.OPS:
+            return "blocked", f"unknown GitHub op {op}"
+        if not action.get("_github_key", True):
+            return "blocked", "no GitHub token stored: torus key set github"
+        repo = str(action.get("repo") or "").strip()
+        mode = action.get("_gh_scope") or "task"
+        if op == "repos" or (op == "search" and not repo):
+            pass
+        elif not gh.REPO_RE.match(repo):
+            return "blocked", "repo must look like owner/name"
+        elif not gh.in_scope(repo, action.get("_repos") or [], mode):
+            return "blocked", f"{repo} is not in this task's repo list (add it to the task, or Settings → GitHub scope: all)"
+        if op != "clone":
+            return "read", ""
+        try:
+            p = resolve(action.get("dest") or action.get("path") or "", action.get("_cwd", TERMUX_HOME))
+        except (OSError, ValueError):
+            return "blocked", "bad clone destination"
+        if is_protected(p):
+            return "blocked", f"{p} holds keys/seal/snapshots and is off limits to the agent"
+        if not in_reach(p):
+            return "danger", f"clones {repo} outside the Termux home / shared storage: {p}"
+        return ("danger" if strict else "change"), f"clones {repo} into {p}"
     return "blocked", f"unknown tool {tool}"
 
 
@@ -410,6 +450,22 @@ async def run_tool(t, phase, action):
             return (f"Android denied the {feat} permission (or Termux:API is missing). This tool is off for the rest of the task; "
                     f"the user can allow it under Android Settings → Apps → Termux:API → Permissions."), False
         return f"[exit {rc}]\n{out}", rc == 0
+    if tool == "github":
+        if not key_present("github"):
+            return "no GitHub token stored: torus key set github", False
+        op = str(action.get("op") or "")
+        a = dict(action)
+        if op == "clone":
+            dest = resolve(action.get("dest") or action.get("path") or "", cwd)
+            a["_dest"] = str(dest)
+        try:
+            token = await get_secret("github")
+            out = await gh.run(op, a, token, t.get("repos") or [], t.get("github_scope") or "task")
+        except (gh.GitHubError, RuntimeError) as e:
+            return str(e), False
+        if op == "clone":
+            t["phases"][phase].setdefault("cloned", []).append(str(a["_dest"]))
+        return out, True
     return f"unknown tool {tool}", False
 
 
@@ -471,7 +527,18 @@ def sentence(action, why):
         return f"Delete {action.get('path')} — {why}."
     if tool == "phone":
         return f"Phone: {action.get('feature')} {json.dumps(action.get('args') or {})[:200]} — {why}."
+    if tool == "github":
+        return f"GitHub {action.get('op')} {action.get('repo') or ''} {action.get('path') or action.get('dest') or ''} — {why}."
     return f"{tool} — {why}."
+
+
+def action_label(action):
+    tool = action.get("tool")
+    if tool == "shell":
+        return action.get("cmd")
+    if tool == "github":
+        return f"github {action.get('op')} {action.get('repo') or ''} {action.get('path') or action.get('q') or action.get('dest') or ''}".rstrip()
+    return f"{tool} {action.get('path') or action.get('feature') or ''}"
 
 
 async def wait_tap(t, action, why):
@@ -495,9 +562,10 @@ async def wait_tap(t, action, why):
 async def plan_task(t):
     t["status"] = "planning"
     save(t)
-    msgs = [{"role": "user", "content": f"Task: {t['task']}\nWorking folder: {t['cwd']}"}]
+    msgs = [{"role": "user", "content": f"Task: {t['task']}\nWorking folder: {t['cwd']}" + (f"\nGitHub repos: {', '.join(t['repos'])}" if t.get("repos") else "")}]
+    repos_text = github_repos_text(t)
     for attempt in range(3):
-        text = await llm(t, PLAN_SYSTEM.format(home=TERMUX_HOME, shared=SHARED[0]), msgs, 3000)
+        text = await llm(t, PLAN_SYSTEM.format(home=TERMUX_HOME, shared=SHARED[0], github=GITHUB_PLAN.format(repos=repos_text) if repos_text else ""), msgs, 3000)
         plan = parse_json(text)
         if plan and isinstance(plan.get("phases"), list) and plan["phases"]:
             break
@@ -527,7 +595,9 @@ async def run_phase(t, i, strict, max_steps):
     save(t)
     before = await asyncio.to_thread(manifest, t["cwd"])
     plan_words = plan_vocab(t)
-    system = WORK_SYSTEM.format(n=i + 1, total=len(t["phases"]), title=ph["title"], home=TERMUX_HOME, shared=SHARED[0], cwd=t["cwd"], max_out=MAX_OUT)
+    repos_text = github_repos_text(t)
+    system = WORK_SYSTEM.format(n=i + 1, total=len(t["phases"]), title=ph["title"], home=TERMUX_HOME, shared=SHARED[0], cwd=t["cwd"], max_out=MAX_OUT,
+                                github=GITHUB_WORK.format(repos=repos_text) if repos_text else "")
     context = (f"Task: {t['task']}\n\nApproved plan:\n" + "\n".join(f"{k + 1}. {p['title']} — reads: {'; '.join(p['reads'])} | changes: "
                f"{'; '.join(p['changes'])} | runs: {'; '.join(p['runs'])}" for k, p in enumerate(t["phases"]))
                + "".join(f"\n\nPhase {k + 1} summary: {p['summary']}" for k, p in enumerate(t["phases"][:i]) if p.get("summary"))
@@ -554,12 +624,15 @@ async def run_phase(t, i, strict, max_steps):
             if not isinstance(action, dict):
                 continue
             action["_cwd"] = t["cwd"]
+            if action.get("tool") == "github":
+                action["_repos"], action["_gh_scope"], action["_github_key"] = t.get("repos") or [], t.get("github_scope") or "task", bool(t.get("github_key"))
             if action.get("tool") == "phone" and action.get("feature") in t.get("disabled_phone", []):
                 results.append(f"{action.get('feature')}: permission denied earlier; tool is off for this task")
                 continue
             level, why = classify(action, plan_words, strict)
-            action.pop("_cwd", None)
-            label = action.get("cmd") if action.get("tool") == "shell" else f"{action.get('tool')} {action.get('path') or action.get('feature') or ''}"
+            for k in ("_cwd", "_repos", "_gh_scope", "_github_key"):
+                action.pop(k, None)
+            label = action_label(action)
             if level == "blocked":
                 entry(t, "blocked", f"{label}: {why}")
                 results.append(f"BLOCKED: {why}")
@@ -643,7 +716,8 @@ def write_dossier(t):
     path = ANSWERS / f"{t['id']}-{slugify(t['task'], 50)}.md"
     parts = [f"---\njob: {t['id']}\nengine: operator:{t['model']}\nstatus: {t['status']}\ncost_usd: {t['cost']}\n"
              f"created: {time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime(t['created']))}\n---\n\n# Operator: {t['task']}\n",
-             f"**{t['status']}** · {t.get('calls', 0)} Claude calls · ≈ ${t['cost']:.4f}" + (f" · {t['stop_reason']}" if t.get("stop_reason") else "")]
+             f"**{t['status']}** · {t.get('calls', 0)} Claude calls · ≈ ${t['cost']:.4f}" + (f" · {t['stop_reason']}" if t.get("stop_reason") else "")
+             + (f" · GitHub: {', '.join(t['repos'])}" if t.get("repos") else "")]
     if t.get("plan_notes"):
         parts.append(f"\n## Plan notes\n\n{t['plan_notes']}")
     for i, ph in enumerate(t["phases"]):
@@ -652,6 +726,8 @@ def write_dossier(t):
             parts.append("\nFiles written/deleted (undoable):\n" + "\n".join(f"- {p}" for p in ph["changed"]))
         if ph.get("shell_changed"):
             parts.append("\nFiles changed by commands (not undoable):\n" + "\n".join(f"- {p}" for p in ph["shell_changed"][:50]))
+        if ph.get("cloned"):
+            parts.append("\nGitHub clones (snapshots without .git):\n" + "\n".join(f"- {p}" for p in ph["cloned"]))
         for d in ph.get("diffs") or []:
             parts.append(f"\n```diff\n{d['diff'][:6000]}\n```")
     parts.append("\n## Log\n\n" + "\n".join(f"- {time.strftime('%H:%M:%S', time.localtime(e['t']))} {e['kind']}: {e['text'][:300]}"
@@ -683,10 +759,17 @@ async def on_create(nc, msg, data):
         return await reply(nc, msg, {"ok": False, "error": f"working folder must exist inside the Termux home or shared storage: {cwd}"})
     if len([x for x in TASKS.values() if x["status"] in ACTIVE | {"needs_you", "paused"}]) >= 2:
         return await reply(nc, msg, {"ok": False, "error": "two tasks are already active; stop one first"})
+    try:
+        repos = gh.parse_repos(data.get("repos") or [])
+    except ValueError as e:
+        return await reply(nc, msg, {"ok": False, "error": str(e)})
+    if repos and not key_present("github"):
+        return await reply(nc, msg, {"ok": False, "error": "no GitHub token stored yet: torus key set github"})
     tid = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
     t = {"id": tid, "task": task[:2000], "model": model, "budget_usd": budget, "pause_between": bool(data.get("pause_between")),
          "ask_every_change": bool(data.get("ask_every_change")), "cwd": str(cwd.resolve()), "created": time.time(), "status": "planning",
-         "phases": [], "phase": 0, "log": [], "cost": 0.0, "calls": 0, "tokens_in": 0, "tokens_out": 0, "pending": None, "stop_reason": ""}
+         "phases": [], "phase": 0, "log": [], "cost": 0.0, "calls": 0, "tokens_in": 0, "tokens_out": 0, "pending": None, "stop_reason": "",
+         "repos": repos, "github_scope": conf["github_scope"], "github_key": conf["github_key"]}
     TASKS[tid] = t
     save(t)
 

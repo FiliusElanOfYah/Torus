@@ -236,7 +236,7 @@ torus install 8
   whose file no longer matches the seal. `torus seal verify` prints the key
   fingerprint; write it on paper and compare now and then. `torus install` and
   `torus key set` re-seal by themselves.
-- **Audit**: `torus audit` runs 15 checks (F-Droid build, no port on 0.0.0.0,
+- **Audit**: `torus audit` runs 16 checks (F-Droid build, no port on 0.0.0.0,
   key file modes, no key in logs, seal, log rotation, storage scope, Termux:Boot,
   package list, Claude off at boot, gateway token, Host-header guard, CRLF,
   Claude traffic path, Operator reach). Every FAIL names the fix. The same list is on the web page under **Settings**.
@@ -314,6 +314,34 @@ streams. Finished tasks become dossiers in Vault → Answers (plan, log, diffs, 
 
 `torus op list | show <id> | follow <id> | yes <id> | no <id> | stop <id> | resume <id> | undo <id> <phase>`.
 
+### Operator on GitHub (read side)
+
+Give the Operator a GitHub token once and it can read your repos without a clone:
+
+1. github.com → Settings → Developer settings → **Fine-grained tokens** → Generate. Pick **only the
+   repos you want TORUS to see**; permissions **Contents: read, Metadata: read, Issues: read,
+   Pull requests: read**. (Add *Contents: write* and *Pull requests: write* later for Phase 3.)
+2. ```bash
+   torus key set github        # pasted hidden, mode 600, read by airgapd only; re-seals
+   torus gh repos              # what the token sees
+   torus gh tree owner/repo src
+   torus gh read owner/repo README.md
+   torus gh commits owner/repo 5 | torus gh issues owner/repo | torus gh prs owner/repo | torus gh pr_diff owner/repo 12
+   torus gh clone owner/repo   # tarball snapshot into ~/projects/<repo> (no .git, no token inside)
+   ```
+3. In a task, name the repos: `torus op "explain the retry logic" --repos owner/repo` or type them
+   in the **Repos** box on the Operator tab. Claude gets `github` actions (`repos tree read search
+   commits issues prs pr_diff clone`); reads run alone, a **clone counts as a change**.
+
+**Scope.** Default `task`: the Operator may touch only the repos named in that task, anything
+else is blocked before any network call. `torus gh scope all` (or Settings → *GitHub scope*)
+opens every repo the token can see; the audit (`extra-6`) warns while that is on. The token never
+lands in a clone, a log or a dossier; file reads are capped at 1 MB and outputs trimmed like
+everything else.
+
+**Honest limits.** Code search runs on default branches only (GitHub's rule). Clones are tarball
+snapshots — fine for reading and editing; to push, Phase 3 adds the write side.
+
 ---
 
 ## Every day
@@ -348,4 +376,4 @@ from editors are stripped automatically. `torus files` shows what differs.
 | 7 | coder: write, run and fix code in your projects; oracled: refills pinned topics on a schedule (`torus oracle`) | coderd, oracled |
 | 8 | hardening: ML-DSA-65 seal, `torus audit`, Claude off at boot, log pruning | none |
 | 9 | backup: `torus export` / `torus restore` (signed tarball) | none |
-| 10 | Operator: Claude plans, you approve, it reads/edits/runs/installs inside Termux with undo per phase; Termux:API phone tools (`torus op`) | operatord |
+| 10 | Operator: Claude plans, you approve, it reads/edits/runs/installs inside Termux with undo per phase; Termux:API phone tools; GitHub read (`torus op`, `torus gh`) | operatord |

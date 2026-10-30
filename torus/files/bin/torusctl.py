@@ -220,8 +220,17 @@ def cmd_op(a):
     args = list(a.args)
     sub = args[0] if args else "list"
     if sub == "create":
-        task = " ".join(args[1:]).strip()
-        t = http("POST", "/api/op", {"task": task})["task"]
+        rest, repos = [], []
+        it = iter(args[1:])
+        for w in it:
+            if w == "--repos":
+                repos += [x for x in next(it, "").split(",") if x]
+            elif w.startswith("--repos="):
+                repos += [x for x in w.split("=", 1)[1].split(",") if x]
+            else:
+                rest.append(w)
+        task = " ".join(rest).strip()
+        t = http("POST", "/api/op", {"task": task, "repos": repos})["task"]
         print(f"planning {t['id']} ...")
         while t["status"] == "planning":
             time.sleep(2)
@@ -259,6 +268,41 @@ def cmd_op(a):
         print(f"restored {len(r['restored'])} file(s)" + (f"; could not restore: {', '.join(r['missing'])}" if r["missing"] else ""))
     else:
         sys.exit('usage: torus op "task" | list | show <id> | follow <id> | approve <id> | yes <id> | no <id> | stop <id> | resume <id> | undo <id> <phase>')
+
+
+def cmd_gh(a):
+    """torus gh <op> ... : GitHub through airgapd's token (same code the Operator uses, scope = all for you)."""
+    import torus_github as gh
+    args = list(a.args)
+    op = args[0] if args else ""
+    usage = ("usage: torus gh repos | tree <owner/repo> [path] [ref] | read <owner/repo> <path> [ref] | search <owner/repo|-> \"<words>\" | "
+             "commits|issues|prs <owner/repo> [n] | pr_diff <owner/repo> <n> | clone <owner/repo> [dest] [ref]")
+    if op not in gh.OPS:
+        sys.exit(usage)
+    act = {"op": op}
+    try:
+        if op in ("tree", "read"):
+            act.update(repo=args[1], path=args[2] if len(args) > 2 else "", ref=args[3] if len(args) > 3 else "")
+        elif op == "search":
+            act.update(repo="" if args[1] == "-" else args[1], q=" ".join(args[2:]))
+        elif op in ("commits", "issues", "prs"):
+            act.update(repo=args[1], n=args[2] if len(args) > 2 else 10)
+        elif op == "pr_diff":
+            act.update(repo=args[1], n=args[2])
+        elif op == "clone":
+            dest = args[2] if len(args) > 2 else os.path.join(os.path.expanduser("~/projects"), args[1].split("/")[-1])
+            act.update(repo=args[1], _dest=os.path.abspath(os.path.expanduser(dest)), ref=args[3] if len(args) > 3 else "")
+    except IndexError:
+        sys.exit(usage)
+
+    async def go():
+        from torus_common import get_secret
+        token = await get_secret("github")
+        return await gh.run(op, act, token, [], "all")
+    try:
+        print(asyncio.run(go()))
+    except (gh.GitHubError, RuntimeError) as e:
+        sys.exit(str(e))
 
 
 def cmd_verify(a):
@@ -368,6 +412,9 @@ def main():
     s = sub.add_parser("op")
     s.add_argument("args", nargs="*")
     s.set_defaults(fn=cmd_op)
+    s = sub.add_parser("gh")
+    s.add_argument("args", nargs="*")
+    s.set_defaults(fn=cmd_gh)
     s = sub.add_parser("verify")
     s.add_argument("--check-only", action="store_true")
     s.set_defaults(fn=cmd_verify)

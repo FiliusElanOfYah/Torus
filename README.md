@@ -36,7 +36,8 @@ Step-by-step details, what every phase does and how to undo: **[`torus/INSTALL.m
 torus ask "question" [url ...]   torus status      torus doctor       torus logs <daemon>
 torus oracle                     torus code        torus export       torus update
 torus llm on|off|verify|auto     torus seal        torus audit        torus rollback
-torus llm gateway <acct> <name>  torus key set anthropic|brave|cloudflare
+torus llm gateway <acct> <name>  torus key set anthropic|brave|cloudflare|github
 torus llm cap <usd>|off          torus llm spend
-torus op "task"                  torus op list|show|yes|no|stop|undo <id> [phase]   (Operator, torus install 10)
+torus op "task" [--repos o/r]    torus op list|show|yes|no|stop|undo <id> [phase]   (Operator, torus install 10)
+torus gh repos|tree|read|search|commits|issues|prs|pr_diff|clone   torus gh scope task|all   (GitHub read)
 ```
