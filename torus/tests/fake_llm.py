@@ -26,6 +26,14 @@ async def main():
             text = json.dumps({"phase_done": True, "summary": "Wrote op-note.txt (stub)."}) if "### write" in prompt else \
                 json.dumps({"say": "writing the note", "actions": [{"tool": "write", "path": "op-note.txt", "content": "hello from the operator\n"},
                                                                     {"tool": "shell", "cmd": "rm -rf nothing"}]})
+        elif "TORUS Console" in system:
+            last = (req.get("messages") or [{}])[-1].get("content", "")
+            if last.startswith("###"):
+                text = json.dumps({"say": "done: the listing is above (stub)."})
+            elif "note" in last.lower():
+                text = json.dumps({"say": "writing the note", "actions": [{"tool": "write", "path": "console-note.txt", "content": "hello from the console\n"}]})
+            else:
+                text = json.dumps({"say": "listing the folder", "actions": [{"tool": "shell", "cmd": "ls -la"}]})
         elif "<<<FILE" in system:
             if "failed with exit code" in prompt:
                 text = ("Plan: fix the NameError by defining name.\n\n<<<FILE hello.py>>>\n"

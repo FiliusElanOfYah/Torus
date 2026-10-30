@@ -366,6 +366,81 @@ def cmd_upload(a):
         print(line)
 
 
+def cmd_console(a):
+    """torus console: the same persistent Claude console as the web page, in the terminal. Allow/Deny taps are answered inline."""
+    import time
+    text = " ".join(a.args).strip()
+    print("TORUS console — type what to do or a raw command. Ctrl-D or 'exit' to leave; /clear, /undo, /task [text], /stop.")
+
+    def show(log, seen):
+        for e in log[seen:]:
+            k, t = e["kind"], e["text"]
+            if k == "user":
+                continue
+            if k == "say":
+                print(f"\033[1m{t}\033[0m")
+            elif k == "cmd":
+                print(f"  {'·' if e.get('level') == 'read' else '±'} {t}")
+            elif k == "out":
+                print("\n".join("    " + ln for ln in t.splitlines()[:60]) + ("\n    …" if t.count("\n") > 60 else ""))
+            elif k in ("ask", "tap"):
+                pass
+            else:
+                print(f"  [{k}] {t}")
+        return len(log)
+
+    def wait(seen):
+        while True:
+            c = http("GET", "/api/op/console")["console"]
+            seen = show(c["log"], seen)
+            if c["status"] == "needs_you" and c.get("pending"):
+                try:
+                    ans = input(f"\033[33m? {c['pending']['sentence']} [y/N/stop] \033[0m").strip().lower()
+                except EOFError:
+                    ans = "stop"
+                http("POST", "/api/op/console/" + ("approve" if ans in ("y", "yes") else "stop" if ans == "stop" else "deny"), {})
+                continue
+            if c["status"] == "idle":
+                return seen
+            time.sleep(1)
+
+    seen = len(http("GET", "/api/op/console")["console"]["log"])
+    while True:
+        if not text:
+            try:
+                text = input("\033[33m› \033[0m").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return
+        if text in ("exit", "quit"):
+            return
+        if text.startswith("/"):
+            cmd, _, rest = text[1:].partition(" ")
+            if cmd == "clear":
+                http("POST", "/api/op/console/clear", {})
+                seen = 0
+                print("cleared")
+            elif cmd == "undo":
+                r = http("POST", "/api/op/console/undo", {"phase": 0})
+                print(f"restored {len(r.get('restored', []))} file(s)")
+            elif cmd == "task":
+                r = http("POST", "/api/op/console/task", {"text": rest} if rest else {})
+                print(f"Operator task {r['task']['id']} created — follow it with: torus op follow {r['task']['id']}")
+            elif cmd == "stop":
+                http("POST", "/api/op/console/stop", {})
+            else:
+                print("commands: /clear /undo /task [text] /stop")
+            text = ""
+            continue
+        try:
+            http("POST", "/api/op/console/send", {"text": text})
+            seen = wait(seen)
+        except KeyboardInterrupt:
+            http("POST", "/api/op/console/stop", {})
+            print("\nstopped")
+        text = ""
+
+
 def cmd_verify(a):
     r = http("POST", "/api/llm/verify", {"fix": not a.check_only})
     for t, info in r["tiers"].items():
@@ -476,6 +551,9 @@ def main():
     s = sub.add_parser("gh")
     s.add_argument("args", nargs="*")
     s.set_defaults(fn=cmd_gh)
+    s = sub.add_parser("console")
+    s.add_argument("args", nargs="*")
+    s.set_defaults(fn=cmd_console)
     s = sub.add_parser("upload")
     s.add_argument("files", nargs="+")
     s.add_argument("--task")

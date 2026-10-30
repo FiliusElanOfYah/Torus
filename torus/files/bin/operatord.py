@@ -210,6 +210,9 @@ def load():
     if n:
         log(NAME, f"pruned {n} upload folder(s) older than {days} days")
     for t in TASKS.values():
+        if t["id"] == CONSOLE_ID:
+            t["status"], t["pending"] = "idle", None
+            continue
         if t["status"] in ACTIVE or t["status"] == "needs_you":
             t["status"], t["pending"] = "interrupted", None
             entry(t, "note", "TORUS restarted during this task. Check the files; Undo phase still works for 24 h.")
@@ -818,6 +821,157 @@ def write_dossier(t):
     t["dossier"] = str(path)
 
 
+# ---------------------------------------------------------------- console (phase 3b): one persistent chat-terminal session
+CONSOLE_ID = "console"
+CONSOLE_SYSTEM = (
+    "You are TORUS Console: an interactive operator inside Termux on the user's Android phone (aarch64, bash, Python 3, no root, "
+    "no sudo; pkg/pip; home {home}; shared storage {shared}; working folder {cwd}). The user types plain words or raw commands; you "
+    "act ONLY through JSON. Reply with ONE JSON object: {{\"say\":\"one or two lines for the user\",\"actions\":[ ...up to 5 of: "
+    '{{"tool":"read","path":"file"}} | {{"tool":"list","path":"folder"}} | {{"tool":"shell","cmd":"command","timeout":120}} | '
+    '{{"tool":"write","path":"file","content":"ENTIRE file"}} | {{"tool":"delete","path":"file"}} | '
+    '{{"tool":"phone","feature":"clipboard_get|clipboard_set|notify|battery|wifi|device|open|camera|record|sms_send|sms_list|location|contacts","args":{{}}}}{github} ]}}\n'
+    "Leave actions empty (or out) when you are answering or done — that ends the turn. If the user typed a command, run it as given. "
+    "Reads run at once; anything that changes something shows the user an Allow/Deny and may be denied — then continue without it. "
+    "Never try to read keys. Outputs are trimmed to {max_out} characters; ask for slices (head/tail/grep). Be brief.")
+CONSOLE_ROUNDS = 6
+
+
+def console():
+    """The console session is a task record with a fixed id so taps, snapshots, undo and the LLM budget all reuse the task code."""
+    c = TASKS.get(CONSOLE_ID)
+    if c and c.get("phases"):
+        return c
+    conf = op_settings()
+    c = {"id": CONSOLE_ID, "task": "console", "model": conf["model"], "budget_usd": conf["default_budget_usd"], "cwd": conf["cwd"], "created": time.time(),
+         "status": "idle", "phases": [{"title": "console", "status": "running", "summary": "", "changed": [], "diffs": [], "snaps": {}, "shell_changed": []}],
+         "phase": 0, "log": [], "messages": [], "cost": 0.0, "calls": 0, "tokens_in": 0, "tokens_out": 0, "pending": None, "stop_reason": "",
+         "repos": [], "github_scope": conf["github_scope"], "github_key": conf["github_key"]}
+    TASKS[CONSOLE_ID] = c
+    return c
+
+
+async def console_turn(t, text):
+    conf = op_settings()
+    t.update(model=conf["model"], budget_usd=conf["default_budget_usd"], github_scope="all" if conf["github_scope"] == "all" else "task",
+             github_key=conf["github_key"], status="running", stop_reason="")
+    if not Path(t["cwd"]).is_dir():
+        t["cwd"] = conf["cwd"]
+    repos_text = github_repos_text(t)
+    system = CONSOLE_SYSTEM.format(home=TERMUX_HOME, shared=SHARED[0], cwd=t["cwd"], max_out=MAX_OUT,
+                                   github=GITHUB_WORK.format(repos=repos_text) if repos_text else "")
+    msgs = t["messages"]
+    msgs.append({"role": "user", "content": text})
+    save(t)
+    try:
+        for _ in range(CONSOLE_ROUNDS):
+            raw = await llm(t, system, msgs)
+            rep = parse_json(raw)
+            msgs.append({"role": "assistant", "content": raw})
+            if not rep:
+                entry(t, "say", raw.strip()[:2000] or "(no answer)")
+                break
+            if rep.get("say"):
+                entry(t, "say", str(rep["say"])[:2000])
+            actions = [a for a in (rep.get("actions") or [])[:5] if isinstance(a, dict)]
+            if not actions:
+                break
+            results = []
+            for action in actions:
+                action["_cwd"] = t["cwd"]
+                if action.get("tool") == "github":
+                    action["_repos"], action["_gh_scope"], action["_github_key"] = t.get("repos") or [], t["github_scope"], bool(t["github_key"])
+                    if action.get("op") in gh.BRANCH_OPS and gh.REPO_RE.match(str(action.get("repo") or "")) and gh.in_scope(action["repo"], action["_repos"], action["_gh_scope"]):
+                        action["_default"] = await github_default(t, action["repo"])
+                level, why = classify(action, set(), False)
+                for k in ("_cwd", "_repos", "_gh_scope", "_github_key", "_default"):
+                    action.pop(k, None)
+                label = action_label(action)
+                if level == "blocked":
+                    entry(t, "blocked", f"{label}: {why}")
+                    results.append(f"BLOCKED: {why}")
+                    continue
+                if level != "read" and not await wait_tap(t, action, why):
+                    results.append(f"User DENIED: {sentence(action, why)}")
+                    continue
+                entry(t, "cmd", label, level=level)
+                out, ok = await run_tool(t, 0, action)
+                entry(t, "out", trim(out, 2500), ok=ok)
+                results.append(f"### {label}\n{trim(out)}")
+                save(t)
+            msgs.append({"role": "user", "content": "\n\n".join(results)})
+        else:
+            entry(t, "note", f"stopped after {CONSOLE_ROUNDS} rounds for this message; say 'continue' to go on")
+    except BudgetStop as e:
+        t["stop_reason"] = str(e)
+        entry(t, "stop", f"{e} — Clear the console to start a new session, or raise the default budget in Settings")
+    except Stopped:
+        entry(t, "stop", "stopped by you")
+    except asyncio.CancelledError:
+        entry(t, "stop", "stopped by you")
+    except Exception as e:
+        entry(t, "error", f"{e.__class__.__name__}: {e}")
+        log(NAME, "console turn failed", f"{e.__class__.__name__}: {e}")
+    finally:
+        if len(msgs) > 24:
+            del msgs[:len(msgs) - 20]
+            msgs.insert(0, {"role": "user", "content": "[earlier console turns trimmed]"})
+            msgs.insert(1, {"role": "assistant", "content": "{\"say\":\"ok\"}"})
+        t["status"], t["pending"] = "idle", None
+        save(t)
+        RUN.pop(t["id"], None)
+
+
+async def on_console(nc, msg, data):
+    t = console()
+    act = str(data.get("action") or "get")
+    if act == "get":
+        return await reply(nc, msg, {"ok": True, "console": public(t)})
+    if act == "send":
+        text = str(data.get("text") or "").strip()[:8000]
+        if not text:
+            return await reply(nc, msg, {"ok": False, "error": "type something first"})
+        if t["status"] != "idle":
+            return await reply(nc, msg, {"ok": False, "error": "the console is busy: answer the tap or press Stop"})
+        if data.get("cwd"):
+            p = resolve(data["cwd"], TERMUX_HOME)
+            if not p.is_dir() or is_protected(p) or not in_reach(p):
+                return await reply(nc, msg, {"ok": False, "error": f"{p} is not a folder inside the Termux home"})
+            t["cwd"] = str(p)
+        if "repos" in data:
+            try:
+                t["repos"] = gh.parse_repos(data.get("repos") or [])
+            except ValueError as e:
+                return await reply(nc, msg, {"ok": False, "error": str(e)})
+        entry(t, "user", text)
+        start(t, console_turn(t, text))
+        await asyncio.sleep(0.05)
+        return await reply(nc, msg, {"ok": True, "console": public(t)})
+    if act == "clear":
+        if t["status"] != "idle":
+            return await reply(nc, msg, {"ok": False, "error": "stop the console first"})
+        shutil.rmtree(SNAP / CONSOLE_ID, ignore_errors=True)
+        TASKS.pop(CONSOLE_ID, None)
+        (DIR / f"{CONSOLE_ID}.json").unlink(missing_ok=True)
+        return await reply(nc, msg, {"ok": True, "console": public(console())})
+    if act == "task":
+        if t["status"] != "idle":
+            return await reply(nc, msg, {"ok": False, "error": "stop the console first"})
+        text = str(data.get("text") or "").strip()
+        if not text:
+            users = [e["text"] for e in t["log"] if e["kind"] == "user"]
+            text = users[-1] if users else ""
+        if len(text) < 3:
+            return await reply(nc, msg, {"ok": False, "error": "say what the task is"})
+        recent = [f"{e['kind']}: {e['text'][:200]}" for e in t["log"][-16:] if e["kind"] in ("user", "say", "cmd", "summary")]
+        task = text + ("\n\nContext from the console:\n" + "\n".join(recent) if recent else "")
+        ok, payload = await create_task({"task": task, "repos": t.get("repos") or [], "cwd": t["cwd"]})
+        if ok:
+            entry(t, "note", f"handed to Operator task {payload['task']['id']}")
+            save(t)
+        return await reply(nc, msg, {"ok": ok, **payload})
+    return await reply(nc, msg, {"ok": False, "error": f"unknown console action {act}"})
+
+
 # ---------------------------------------------------------------- handlers
 def start(t, coro):
     task = asyncio.create_task(coro)
@@ -825,28 +979,33 @@ def start(t, coro):
 
 
 async def on_create(nc, msg, data):
+    ok, payload = await create_task(data)
+    await reply(nc, msg, {"ok": ok, **payload})
+
+
+async def create_task(data):
     conf = op_settings()
     task = str(data.get("task") or "").strip()
     if len(task) < 3:
-        return await reply(nc, msg, {"ok": False, "error": "describe the task"})
+        return False, {"error": "describe the task"}
     model = data.get("model") or conf["model"]
     if model not in ("sonnet", "opus", "haiku"):
-        return await reply(nc, msg, {"ok": False, "error": "model must be sonnet, opus or haiku"})
+        return False, {"error": "model must be sonnet, opus or haiku"}
     try:
         budget = round(max(0.05, min(100.0, float(data.get("budget_usd") or conf["default_budget_usd"]))), 2)
     except (TypeError, ValueError):
-        return await reply(nc, msg, {"ok": False, "error": "budget_usd must be a number"})
+        return False, {"error": "budget_usd must be a number"}
     cwd = Path(os.path.expanduser(str(data.get("cwd") or conf["cwd"])))
     if not cwd.is_dir() or not in_reach(cwd.resolve()) or is_protected(cwd.resolve()):
-        return await reply(nc, msg, {"ok": False, "error": f"working folder must exist inside the Termux home or shared storage: {cwd}"})
-    if len([x for x in TASKS.values() if x["status"] in ACTIVE | {"needs_you", "paused"}]) >= 2:
-        return await reply(nc, msg, {"ok": False, "error": "two tasks are already active; stop one first"})
+        return False, {"error": f"working folder must exist inside the Termux home or shared storage: {cwd}"}
+    if len([x for x in TASKS.values() if x["id"] != CONSOLE_ID and x["status"] in ACTIVE | {"needs_you", "paused"}]) >= 2:
+        return False, {"error": "two tasks are already active; stop one first"}
     try:
         repos = gh.parse_repos(data.get("repos") or [])
     except ValueError as e:
-        return await reply(nc, msg, {"ok": False, "error": str(e)})
+        return False, {"error": str(e)}
     if repos and not key_present("github"):
-        return await reply(nc, msg, {"ok": False, "error": "no GitHub token stored yet: torus key set github"})
+        return False, {"error": "no GitHub token stored yet: torus key set github"}
     tid = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
     uploads = ""
     batch = str(data.get("uploads") or "").strip()
@@ -854,7 +1013,7 @@ async def on_create(nc, msg, data):
         try:
             src = up.batch_dir(batch)
         except ValueError as e:
-            return await reply(nc, msg, {"ok": False, "error": str(e)})
+            return False, {"error": str(e)}
         if src.is_dir():
             dst = up.UPLOADS / tid
             os.replace(src, dst)
@@ -877,11 +1036,11 @@ async def on_create(nc, msg, data):
         finally:
             RUN.pop(tid, None)
     start(t, go())
-    await reply(nc, msg, {"ok": True, "task": public(t)})
+    return True, {"task": public(t)}
 
 
 async def on_list(nc, msg, data):
-    rows = sorted(TASKS.values(), key=lambda x: x["created"], reverse=True)[:60]
+    rows = sorted((x for x in TASKS.values() if x["id"] != CONSOLE_ID), key=lambda x: x["created"], reverse=True)[:60]
     await reply(nc, msg, {"ok": True, "tasks": [{k: x.get(k) for k in ("id", "task", "status", "created", "cost", "model", "phase", "finished")}
                                                 | {"phases": len(x["phases"])} for x in rows], "settings": op_settings(),
                           "termux_api": bool(shutil.which("termux-clipboard-get")),
@@ -949,6 +1108,9 @@ async def on_action(nc, msg, data):
         if ph.get("undone"):
             return await reply(nc, msg, {"ok": False, "error": "that phase was already undone"})
         res = await asyncio.to_thread(undo_phase, t, i)
+        if t["id"] == CONSOLE_ID:  # the console keeps going: forget the restored snapshots so the next edits are undoable again
+            shutil.rmtree(SNAP / CONSOLE_ID, ignore_errors=True)
+            ph.update(snaps={}, changed=[], diffs=[], undone=None)
         save(t)
         return await reply(nc, msg, {"ok": True, "task": public(t), **res})
     else:
@@ -969,5 +1131,6 @@ async def on_start(nc):
 
 
 if __name__ == "__main__":
-    run_daemon(NAME, {"torus.op.create": on_create, "torus.op.list": on_list, "torus.op.get": on_get, "torus.op.action": on_action},
+    run_daemon(NAME, {"torus.op.create": on_create, "torus.op.list": on_list, "torus.op.get": on_get, "torus.op.action": on_action,
+                      "torus.op.console": on_console},
                concurrent=True, on_start=on_start)

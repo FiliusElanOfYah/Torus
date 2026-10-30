@@ -574,7 +574,22 @@ async def api_audit(method):
 
 
 async def api_op(method, path, body):
-    """Operator (phase 10): GET /api/op, POST /api/op {task,...}, GET /api/op/<id>, POST /api/op/<id>/<action>."""
+    """Operator (phase 10): GET /api/op, POST /api/op {task,...}, GET /api/op/<id>, POST /api/op/<id>/<action>.
+    Console (phase 3b): GET /api/op/console, POST /api/op/console/{send|clear|task|approve|deny|stop|undo}."""
+    cm = re.fullmatch(r"/api/op/console(?:/(send|clear|task))?", path)
+    if cm:
+        try:
+            if cm.group(1):
+                if method != "POST":
+                    return err(405, "POST")
+                res = await nreq("torus.op.console", {**(body or {}), "action": cm.group(1)}, 30)
+            else:
+                res = await nreq("torus.op.console", {"action": "get"}, 10)
+        except Exception as e:
+            return err(503, f"operatord did not answer ({e.__class__.__name__}): torus install 10  /  torus status")
+        if not res.get("ok"):
+            return err(400, res.get("error") or "console refused")
+        return 200, res
     m = re.fullmatch(r"/api/op(?:/([0-9A-Za-z-]+)(?:/(approve_plan|approve|deny|stop|resume|undo))?)?", path)
     if not m:
         return err(404, "not found")

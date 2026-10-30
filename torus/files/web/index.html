@@ -56,6 +56,8 @@ button:active{transform:scale(.98)}button:disabled{opacity:.5}
 .diff{background:#0e1211;border:1px solid var(--line);border-radius:8px;overflow-x:auto;font:12px/1.45 var(--mono);padding:8px 0;max-height:420px;overflow-y:auto}
 .diff div{white-space:pre;padding:0 10px}.diff .a{color:var(--green);background:#0f2a1c}.diff .r{color:var(--red);background:#2a1212}.diff .h{color:var(--blue)}
 .out{background:#0e1211;border:1px solid var(--line);border-radius:8px;padding:10px;font:12px var(--mono);white-space:pre-wrap;max-height:360px;overflow:auto}
+.con-log{max-height:62vh;overflow:auto;font:13px var(--mono);line-height:1.45}.con-line{padding:4px 0;border-bottom:1px solid #141a18;word-break:break-word}.con-user{color:var(--amber)}.con-say{color:var(--text)}.con-cmd code{color:#9fd3c7}
+.con-out{margin:4px 0 6px 14px;padding:6px 8px;background:#0e1211;border-left:2px solid var(--line);font:12px var(--mono);white-space:pre-wrap;max-height:220px;overflow:auto;color:var(--dim)}.con-out.con-bad{border-left-color:#c45}
 .bar{height:6px;border-radius:3px;background:var(--amber);margin-top:4px}
 .btnlink{display:inline-flex;align-items:center;min-height:44px;padding:0 18px;border-radius:8px;border:1px solid var(--line);background:#1b221f;color:var(--text);font:600 14px var(--mono);text-decoration:none}
 </style>
@@ -68,6 +70,7 @@ button:active{transform:scale(.98)}button:disabled{opacity:.5}
     <a href="#/jobs" data-tab="jobs" data-testid="nav-jobs">Jobs</a>
     <a href="#/code" data-tab="code" data-testid="nav-code">Code</a>
     <a href="#/op" data-tab="op" data-testid="nav-op">Operator</a>
+    <a href="#/console" data-tab="console" data-testid="nav-console">Console</a>
     <a href="#/vault" data-tab="vault" data-testid="nav-vault">Vault</a>
     <a href="#/settings" data-tab="settings" data-testid="nav-settings">Settings<span class="badge" id="audit-badge" data-testid="audit-badge" title="audit failures"></span></a>
   </nav>
@@ -805,6 +808,64 @@ async function viewOpTask(id) {
   return t;
 }
 
+// ---------------------------------------------------------------- Console (phase 3b): persistent chat-terminal with Claude
+let consoleDraft = "";
+async function viewConsole() {
+  let c;
+  try { c = (await api("/api/op/console")).console; } catch (e) { $("#view").innerHTML = opLocked(e); return null; }
+  const prev = $("#con-input"); if (prev) consoleDraft = prev.value;
+  const busy = c.status !== "idle";
+  const line = e => {
+    const t = `<span class="hint" style="margin-right:6px">${esc(when(e.t))}</span>`;
+    if (e.kind === "user") return `<div class="con-line con-user" data-testid="con-user">${t}<b>›</b> ${esc(e.text)}</div>`;
+    if (e.kind === "say") return `<div class="con-line con-say" data-testid="con-say">${t}${esc(e.text)}</div>`;
+    if (e.kind === "cmd") return `<div class="con-line con-cmd" data-testid="con-cmd">${t}<span class="hint">${e.level === "read" ? "·" : "±"}</span> <code>${esc(e.text)}</code></div>`;
+    if (e.kind === "out") return `<pre class="con-out ${e.ok === false ? "con-bad" : ""}" data-testid="con-out">${esc(e.text)}</pre>`;
+    if (e.kind === "ask") return `<div class="con-line" data-testid="con-ask"><span class="s-needs_you">?</span> ${esc(e.text)}</div>`;
+    if (e.kind === "tap") return `<div class="con-line hint">${t}${esc(e.text)}</div>`;
+    if (e.kind === "blocked") return `<div class="con-line s-error" data-testid="con-blocked">${t}blocked: ${esc(e.text)}</div>`;
+    return `<div class="con-line ${e.kind === "error" || e.kind === "stop" ? "warn" : "hint"}" data-testid="con-${e.kind}">${t}${esc(e.text)}</div>`;
+  };
+  const ph = c.phases[0] || {};
+  $("#view").innerHTML = `
+  <div class="card" style="padding-bottom:8px">
+    <div class="row" style="align-items:center"><span class="pill s-${c.status === "idle" ? "done" : opPill(c.status)}" data-testid="con-status">${esc(c.status === "idle" ? "ready" : opWord(c.status))}</span>
+      <span class="hint" style="flex:1">${esc(c.model)} · ${c.calls || 0} calls · ≈ ${fmtUsd(c.cost || 0)} of ${fmtUsd(c.budget_usd)} this session · <code class="k">${esc(c.cwd)}</code></span></div>
+    <p class="hint" style="margin:6px 0 0">Type plain words or a raw command. Reads run at once; anything that changes something waits for Allow/Deny here. Same thing in Termux: <code class="k">torus console</code>.</p></div>
+  <div class="card con-log" id="con-log" data-testid="con-log">${c.log.length ? c.log.slice(-200).map(line).join("") : `<p class="hint" data-testid="con-empty">Nothing yet. Try: <i>what is using the most disk under ~/projects?</i> or <code class="k">ls -la</code></p>`}
+    ${c.status === "running" ? `<div class="con-line hint" data-testid="con-working">working…</div>` : ""}</div>
+  <div style="height:${c.status === "needs_you" ? 150 : 110}px"></div>
+  <div class="card" data-testid="con-bar" style="position:sticky;bottom:8px;border-color:${c.status === "needs_you" ? "var(--amber)" : "var(--line)"}">
+    ${c.status === "needs_you" && c.pending ? `<div class="row" style="align-items:center;margin-bottom:8px"><p style="margin:0;flex:1 1 100%" data-testid="con-pending">${esc(c.pending.sentence)}</p><button class="primary" data-act="approve" data-testid="con-allow-button">Allow</button><button data-act="deny" data-testid="con-deny-button">Deny</button></div>` : ""}
+    <div class="row" style="align-items:flex-end"><textarea id="con-input" data-testid="con-input" class="mono" rows="2" style="flex:1;min-height:44px" placeholder="${busy ? "working… (Stop to interrupt)" : "say what to do, or type a command"}" ${busy ? "disabled" : ""}>${esc(consoleDraft)}</textarea>
+      ${busy ? `<button data-act="stop" data-testid="con-stop-button">Stop</button>` : `<button class="primary" id="con-send" data-testid="con-send-button">Send</button>`}</div>
+    <div class="row" style="margin-top:8px;flex-wrap:wrap"><button data-act="task" data-testid="con-task-button" ${busy ? "disabled" : ""} title="hand the last request to the Operator as a planned task">Make it a task</button>
+      <button data-act="undo" data-testid="con-undo-button" ${busy || !(ph.changed || []).length ? "disabled" : ""}>Undo edits${(ph.changed || []).length ? ` (${ph.changed.length})` : ""}</button>
+      <button data-act="clear" data-testid="con-clear-button" ${busy ? "disabled" : ""}>Clear</button></div></div>`;
+  const logEl = $("#con-log"); logEl.scrollTop = logEl.scrollHeight;
+  const send = async () => {
+    const text = $("#con-input").value.trim(); if (!text) return;
+    $("#con-send").disabled = true;
+    try { await api("/api/op/console/send", {text}); consoleDraft = ""; route(); } catch (e) { toast(e.message); $("#con-send").disabled = false; }
+  };
+  if ($("#con-send")) { $("#con-send").onclick = send; $("#con-input").onkeydown = e => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) send(); }; }
+  $("#view").onclick = async e => {
+    const b = e.target.closest("button[data-act]"); if (!b) return;
+    const act = b.dataset.act; let body = {};
+    if (act === "undo") { if (!confirm(`Restore the ${(ph.changed || []).length} file(s) the console wrote or deleted?`)) return; body = {phase: 0}; }
+    if (act === "clear" && !confirm("Clear the console? Claude forgets this session; the budget counter resets.")) return;
+    if (act === "task") { const text = $("#con-input").value.trim(); body = text ? {text} : {}; }
+    b.disabled = true;
+    try {
+      const r = await api(`/api/op/console/${act}`, body);
+      if (act === "undo") toast(`Restored ${r.restored.length} file(s)`);
+      if (act === "task") { location.hash = "#/optask/" + r.task.id; return; }
+      route();
+    } catch (err) { toast(err.message); b.disabled = false; }
+  };
+  return c;
+}
+
 const tierCls = {ok: "s-ok", outdated: "s-needs_you", missing: "s-error", unknown: "hint", unchecked: "hint"};
 const tierWord = {ok: "current", outdated: "newer available", missing: "retired id", unknown: "not visible to your key", unchecked: "not checked yet"};
 async function renderModels(report) {
@@ -849,6 +910,10 @@ async function route() {
       const t = await viewOpTask(id);
       if (["planning", "running"].includes(t.status)) pollTimer = setTimeout(route, 2000);
     } else if (tab === "op") await viewOp();
+    else if (tab === "console") {
+      const c = await viewConsole();
+      if (c && ["running", "needs_you"].includes(c.status)) pollTimer = setTimeout(route, 1500);
+    }
     else if (tab === "job" && id) {
       if (document.querySelector(".pinbox select")) { pollTimer = setTimeout(route, 2000); return; }  // user is pinning: do not wipe the chooser
       const j = await viewJob(id);

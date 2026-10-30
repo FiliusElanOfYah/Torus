@@ -41,5 +41,6 @@ torus llm cap <usd>|off          torus llm spend
 torus op "task" [--repos o/r]    torus op list|show|yes|no|stop|undo <id> [phase]   (Operator, torus install 10)
 torus gh repos|tree|read|search|commits|issues|prs|pr_diff|clone   torus gh scope task|all   (GitHub read)
 torus gh branch|commit|pr|comment|pr_close|merge|revert|delete_branch|push ...            (GitHub write)
+torus console ["message"]        chat-terminal with Claude; reads run, changes ask Allow/Deny (web: Console tab)
 torus upload <file...> --task <id> | --project <name> [--unpack]   (files for a task, 100 MB each)
 ```

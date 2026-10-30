@@ -361,6 +361,15 @@ and `pr_close` — the local **Undo phase** button restores files on the phone o
 `torus gh branch o/r fix-x`, `torus gh commit o/r fix-x "msg" ./a.py:src/a.py`,
 `torus gh pr o/r fix-x "title"`, `torus gh push ~/projects/r fix-x`, `torus gh merge o/r 12`.
 
+### Console (chat-terminal)
+
+**Console** tab (or `torus console` in Termux): one persistent session with Claude. Type plain
+words or a raw command; reads run at once, anything that changes something shows **Allow / Deny**
+inline, output renders like a terminal. Same budget rules as tasks (the session cap is the
+Operator default budget; **Clear** resets it). **Undo edits** restores files the console wrote or
+deleted; **Make it a task** hands the request plus the recent console context to the Operator as
+a planned task. Claude keeps the last ~24 turns.
+
 ### Handing files to a task (uploads)
 
 On the Operator tab press **＋ Add files** before you press Plan: each file goes up in 8 MB
